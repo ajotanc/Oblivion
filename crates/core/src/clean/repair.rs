@@ -475,7 +475,7 @@ pub(super) use win::{repair_value, restore_reg_value};
 
 #[cfg(windows)]
 mod win {
-    use std::{path::Path, process::Command};
+    use std::path::Path;
 
     use serde_json::json;
     use winreg::{RegKey, RegValue, enums::*, types::ToRegValue};
@@ -542,7 +542,7 @@ mod win {
         }
         let reg = Path::new(&std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into()))
             .join(r"System32\reg.exe");
-        let ok = Command::new(reg)
+        let ok = crate::sys::command(reg)
             .args(["export", &format!(r"{hive}\{subkey}")])
             .arg(&file)
             .arg("/y")
@@ -606,7 +606,7 @@ mod win {
         }
         // Serviço: além de não iniciar mais, para a instância que está rodando agora (se não parar, o Start=4 já vale no próximo boot).
         let stopped = fix.service().map(|svc| {
-            Command::new("sc.exe")
+            crate::sys::command("sc.exe")
                 .args(["stop", svc])
                 .output()
                 .is_ok_and(|o| o.status.success())

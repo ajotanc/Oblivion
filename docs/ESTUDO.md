@@ -1,30 +1,32 @@
-# Mapa de estudo: ComboFix -> Oblivion
+# Fontes de referência
 
-O ComboFix (extraído em `_research/combofix_extracted/$0`) é um instalador NSIS que reúne scripts
-`.bat/.cmd/.vbs`, ferramentas de terceiros renomeadas `.3XE` e arquivos de dados. Foi escrito para XP, Vista, 7 e 8.
+A cobertura de persistência do Oblivion segue listas públicas e abertas:
 
-| ComboFix | O que faz | Oblivion |
-|---|---|---|
-| `Combobatch.bat` | Entrada: checa privilégio, define ambiente | `cli/src/main.rs` |
-| `restore_pt.vbs` | Ponto de restauração via WMI (`SystemRestore`) | pendente, antes de qualquer remoção |
-| `RegScan.cmd`, `SuppScan.cmd` + `swreg`, `swsc` | Varre registro e serviços | `scanners/persistence_win.rs` |
-| `svc_wht.dat`, `MDWht.dat` | Listas de permissão (o que é legítimo) | pendente (arquivo de dados) |
-| `rogues.dat`, `srizbi.md5`, `badclsid.c` | Listas de ameaças conhecidas | pendente (arquivo de dados) |
-| `*.cfx` | Pastas e arquivos suspeitos por perfil de usuário | pendente |
-| `CF-Script.cmd` | Interpreta o "CFScript" colado pelo usuário | fora de escopo (modo só leitura) |
-| `mbr.3XE`, `rmbr.3XE`, `Boot-Rk.cmd` | Setor de boot e rootkits | pendente |
-| `catchme.3XE` | Anti-rootkit | pendente |
-| `Kill-All.cmd` | Encerra processos (poupando os do sistema) | fora de escopo (só leitura) |
+- Autoruns (Sysinternals): https://learn.microsoft.com/sysinternals/downloads/autoruns
+- MITRE ATT&CK, persistência: T1546 (eventos), T1547 (inicialização/logon), T1037 (scripts de logon),
+  T1053 (tarefas), T1543 (serviços), T1112 (registro). https://attack.mitre.org/tactics/TA0003/
+- Regras Sigma (detecção em registro): https://github.com/SigmaHQ/sigma
+- LOLBAS (programas do Windows abusados): https://lolbas-project.github.io/
 
-## Roteiro de leitura sugerido
+## Cobertura
+
+Em `crates/core/src/scanners/`:
+
+- `persistence_win.rs`: Run/RunOnce (inclusive WOW64 e outras contas), Policies\Explorer\Run, Winlogon, pasta
+  Startup, serviços e drivers, IFEO, AppInit_DLLs.
+- `tasks_win.rs`: tarefas agendadas (XML, inclusive `ComHandler`).
+- `wmi_win.rs`: consumidores de evento do WMI.
+- `baseline_win.rs`: BootExecute, shell do modo seguro, LSA, BHO, ShellExecuteHooks, win.ini/system.ini,
+  AppCertDLLs, AutoRun do cmd.exe, UserInitMprLogonScript, protetor de tela, provedores de hora, monitores de
+  impressão, ajudantes do netsh, Active Setup, SilentProcessExit, classes COM do usuário, suplementos do
+  Office e catálogos do Winsock.
+
+Ainda não cobertos: Appx/MSIX de inicialização, extensões de shell (`ContextMenuHandlers`) e pastas de
+inicialização de políticas de grupo.
+
+## Roteiro de leitura
 
 1. `crates/core/src/finding.rs`: o modelo.
 2. `crates/core/src/classify.rs`: como decidir a gravidade (e os testes no fim do arquivo).
 3. `crates/core/src/scanners/persistence_win.rs`: de onde vêm os dados (um bloco por técnica).
 4. `crates/core/src/report/html.rs`: como o relatório é montado e por que tudo é escapado.
-
-## Para ir além
-
-- Comparar `svc_wht.dat` com os serviços desta máquina e criar a lista de permissão do Oblivion.
-- Ler `restore_pt.vbs` e reimplementar em Rust (API de Restauração do Sistema).
-- Adicionar o scanner de tarefas agendadas (`C:\Windows\System32\Tasks`, XML).

@@ -2,8 +2,7 @@
 
 **Documento do projeto. Segue o `D:\Apps\utility_project_guidelines.md`.**
 
-Utilitário de diagnóstico e limpeza de segurança para Windows e Linux, sucessor moderno do ComboFix,
-descontinuado. Escrito em Rust, executável local, sem rede e sem telemetria.
+Utilitário de diagnóstico e limpeza de segurança para Windows e Linux, escrito em Rust, executável local, sem rede e sem telemetria.
 
 ## 🎯 Objetivo
 
@@ -79,7 +78,6 @@ D:\Apps\Oblivion\
 ├── README.md
 ├── oblivion_project.md  # este arquivo
 ├── dist/                # executável de release e hash
-└── _research/           # amostra do ComboFix e arquivos extraídos (não executar)
 ```
 
 ## ▶️ Comandos
@@ -106,13 +104,6 @@ oblivion undo PASTA_DA_QUARENTENA
   nunca mexe na pasta do Windows nem no MBR; só remove o que sabe desfazer.
 * **Falhar de forma segura**: comando auxiliar que falha vira aviso ("NÃO verificado"), nunca "limpo".
 * **Sem promessa de "detectar tudo"**: o que o Oblivion não cobre está no README.
-
-## 🧪 Material de pesquisa (`_research/`)
-
-* `combofix_dl/ComboFix.exe`: baixado do BleepingComputer (5.659.583 bytes, SHA-256
-  `23EA3C510C9B0D48047A4B236A82A7FDBED3BD58C1B3EECF82729EF1C849D421`). Instalador NSIS com UPX, 32 bits.
-* `combofix_extracted/`: 226 arquivos extraídos com 7-Zip (scripts, utilitários `.3XE`, listas).
-* **Nunca executar** nada daqui. Não incluir no pacote de entrega nem em repositório.
 
 ## ✅ Checklist de entrega
 

@@ -3,7 +3,7 @@
 @import '@fontsource/jetbrains-mono/400.css';
 @import '@fontsource/jetbrains-mono/600.css';
 
-/* Tokens de cor. O console azul é uma homenagem ao ComboFix (`COLOR 17`: fundo azul, texto branco). */
+/* Tokens de cor. O console tem fundo azul e texto claro (estilo terminal). */
 :root {
   --bg: #f4f6fb;
   --card: #ffffff;
@@ -136,4 +136,170 @@ body {
 }
 .cursor-blink {
   animation: blink 1.1s steps(1) infinite;
+}
+
+/* Campos de formulário: um só desenho para select, input e textarea. */
+@layer components {
+  .field {
+    width: 100%;
+    min-height: 2.75rem;
+    padding: 0 0.875rem;
+    border: 1px solid var(--line);
+    border-radius: 0.625rem;
+    background-color: color-mix(in srgb, var(--bg) 55%, var(--card));
+    color: var(--fg);
+    font: inherit;
+    font-size: 0.875rem;
+    box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.08);
+    transition:
+      border-color 0.15s,
+      box-shadow 0.15s;
+  }
+  .field:hover:not(:disabled) {
+    border-color: color-mix(in srgb, var(--primary) 45%, var(--line));
+  }
+  .field:focus-visible {
+    outline: 2px solid transparent; /* mantém o contorno no modo de alto contraste */
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 28%, transparent);
+  }
+  .field::placeholder {
+    color: var(--muted);
+    opacity: 0.7;
+  }
+  .field:disabled {
+    opacity: 0.6;
+  }
+
+  textarea.field {
+    padding: 0.625rem 0.875rem;
+    min-height: 6.5rem;
+    resize: none; /* o puxador nativo quebrava o canto arredondado */
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    line-height: 1.6;
+    scrollbar-width: thin;
+    scrollbar-color: var(--line) transparent;
+  }
+
+  /* Seta própria no lugar da do navegador (segue o tema pelas variáveis). */
+  select.field {
+    width: auto;
+    padding-right: 2.25rem;
+    appearance: none;
+    cursor: pointer;
+    background-image:
+      linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+      linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+    background-position:
+      calc(100% - 1.15rem) 50%,
+      calc(100% - 0.8rem) 50%;
+    background-size: 0.35rem 0.35rem;
+    background-repeat: no-repeat;
+  }
+}
+
+/* "Abrir arquivo…": botão discreto com contorno tracejado. O input de arquivo fica escondido dentro do rótulo. */
+@layer components {
+  .file-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    min-height: 2.75rem;
+    padding: 0 1rem;
+    border: 1px dashed color-mix(in srgb, var(--primary) 50%, var(--line));
+    border-radius: 0.625rem;
+    color: var(--primary);
+    font-size: 0.875rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition:
+      background-color 0.15s,
+      border-color 0.15s;
+  }
+  .file-button:hover {
+    border-style: solid;
+    border-color: var(--primary);
+    background-color: color-mix(in srgb, var(--primary) 12%, transparent);
+  }
+  .file-button:has(:focus-visible) {
+    outline: 3px solid var(--primary);
+    outline-offset: 2px;
+  }
+}
+
+/* Acordeão das opções avançadas: cabeçalho com ícone e resumo, seta que gira e abertura suave. */
+:root {
+  interpolate-size: allow-keywords;
+}
+@layer components {
+  .accordion {
+    border: 1px solid var(--line);
+    border-radius: 0.875rem;
+    background: var(--card);
+    transition: border-color 0.15s;
+  }
+  .accordion[open],
+  .accordion:hover {
+    border-color: color-mix(in srgb, var(--primary) 40%, var(--line));
+  }
+  .accordion > summary {
+    display: flex;
+    align-items: center;
+    gap: 0.875rem;
+    padding: 0.875rem 1rem;
+    border-radius: 0.875rem;
+    cursor: pointer;
+    list-style: none;
+  }
+  .accordion > summary::-webkit-details-marker {
+    display: none;
+  }
+  .accordion > summary:focus-visible {
+    outline: 3px solid var(--primary);
+    outline-offset: 2px;
+  }
+  .icon-tile {
+    display: grid;
+    place-items: center;
+    width: 2.5rem;
+    height: 2.5rem;
+    flex: none;
+    border-radius: 0.625rem;
+    background: color-mix(in srgb, var(--primary) 14%, transparent);
+    color: var(--primary);
+  }
+  .accordion-chevron {
+    flex: none;
+    transition: transform 0.25s;
+  }
+  .accordion[open] .accordion-chevron {
+    transform: rotate(180deg);
+  }
+  .accordion-body {
+    padding: 1rem;
+    border-top: 1px solid var(--line);
+  }
+  .accordion::details-content {
+    height: 0;
+    overflow: clip;
+    transition:
+      height 0.25s,
+      content-visibility 0.25s allow-discrete;
+  }
+  .accordion[open]::details-content {
+    height: auto;
+  }
+}
+
+/* Ícone em quadrado arredondado: o mesmo desenho no acordeão e no menu de passos. */
+@layer components {
+  .icon-tile-off {
+    background: color-mix(in srgb, var(--muted) 14%, transparent);
+    color: var(--muted);
+  }
+  .icon-tile-on {
+    background: color-mix(in srgb, var(--primary-fg) 20%, transparent);
+    color: var(--primary-fg);
+  }
 }

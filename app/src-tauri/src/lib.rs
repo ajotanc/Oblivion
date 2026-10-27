@@ -470,7 +470,9 @@ fn restart_as_admin(app: AppHandle) -> Result<(), String> {
     #[cfg(windows)]
     {
         let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        use std::os::windows::process::CommandExt;
         std::process::Command::new("powershell")
+            .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
             .args([
                 "-NoProfile",
                 "-Command",

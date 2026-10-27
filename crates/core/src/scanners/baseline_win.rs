@@ -26,6 +26,14 @@ pub struct Source<'a> {
     /// DLL ou programa de uma classe COM.
     pub clsid: &'a dyn Fn(&str) -> Option<String>,
     pub file: &'a dyn Fn(&str) -> Option<String>,
+    /// Valor binário do registro (o catálogo do Winsock guarda o caminho da DLL assim).
+    pub binary: &'a dyn Fn(&str, &str) -> Option<Vec<u8>>,
+}
+
+/// Caminho de texto no começo de um valor binário (termina no primeiro byte zero).
+fn leading_text(bytes: &[u8]) -> String {
+    let end = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
+    String::from_utf8_lossy(&bytes[..end]).into_owned()
 }
 
 fn finding(
@@ -199,6 +207,166 @@ pub fn evaluate(src: &Source) -> Vec<Finding> {
         }
     }
 
+    // Outros pontos de carga clássicos (lista do Autoruns e MITRE ATT&CK T1546/T1547/T1037/T1112):
+    // valores que o Windows deixa vazios ou aponta para a pasta do sistema.
+    let session = format!(r"HKLM\{SESSION_MANAGER}\AppCertDLLs");
+    for name in (src.values)(&session) {
+        let dll = (src.string)(&session, &name).unwrap_or_default();
+        out.push(deviation(
+            &session,
+            &name,
+            &dll,
+            "DLL carregada em todo programa que cria processos (AppCertDLLs fica vazio no Windows)",
+        ));
+    }
+    for (key, name, why) in [
+        (
+            r"HKLM\SOFTWARE\Microsoft\Command Processor",
+            "AutoRun",
+            "Comando executado toda vez que um cmd.exe abre (uso legítimo é raro)",
+        ),
+        (
+            r"HKCU\SOFTWARE\Microsoft\Command Processor",
+            "AutoRun",
+            "Comando executado toda vez que um cmd.exe abre (uso legítimo é raro)",
+        ),
+        (
+            r"HKCU\Environment",
+            "UserInitMprLogonScript",
+            "Script executado no login (técnica de persistência; uso legítimo é raro)",
+        ),
+    ] {
+        if let Some(v) = (src.string)(key, name).filter(|v| !v.trim().is_empty()) {
+            out.push(deviation(key, name, &v, why));
+        }
+    }
+    let desktop = r"HKCU\Control Panel\Desktop";
+    if let Some(v) =
+        (src.string)(desktop, "SCRNSAVE.EXE").filter(|v| !v.trim().is_empty() && !is_system_file(v))
+    {
+        out.push(deviation(desktop, "SCRNSAVE.EXE", &v, "Protetor de tela fora da pasta do Windows (um .scr é um programa e roda sem o usuário pedir)"));
+    }
+    let times = r"HKLM\SYSTEM\CurrentControlSet\Services\W32Time\TimeProviders";
+    for id in (src.subkeys)(times) {
+        let key = format!(r"{times}\{id}");
+        if let Some(dll) = (src.string)(&key, "DllName").filter(|d| !is_system_file(d)) {
+            out.push(deviation(
+                &key,
+                "DllName",
+                &dll,
+                "Provedor de hora do Windows apontando para fora da pasta do sistema",
+            ));
+        }
+    }
+    // Monitores de impressão e ajudantes do netsh guardam só o nome da DLL (pasta do sistema);
+    // um caminho completo fora dela é o desvio.
+    let monitors = r"HKLM\SYSTEM\CurrentControlSet\Control\Print\Monitors";
+    for id in (src.subkeys)(monitors) {
+        let key = format!(r"{monitors}\{id}");
+        if let Some(dll) =
+            (src.string)(&key, "Driver").filter(|d| d.contains('\\') && !is_system_file(d))
+        {
+            out.push(deviation(
+                &key,
+                "Driver",
+                &dll,
+                "Monitor de impressão carregado de fora da pasta do Windows (roda como SYSTEM)",
+            ));
+        }
+    }
+    let netsh = r"HKLM\SOFTWARE\Microsoft\NetSh";
+    for name in (src.values)(netsh) {
+        let dll = (src.string)(netsh, &name).unwrap_or_default();
+        if dll.contains('\\') && !is_system_file(&dll) {
+            out.push(deviation(
+                netsh,
+                &name,
+                &dll,
+                "Ajudante do netsh carregado de fora da pasta do Windows",
+            ));
+        }
+    }
+    // Active Setup roda o StubPath uma vez por usuário; muito programa legítimo usa, então só o que já parece malware.
+    let setup = r"HKLM\SOFTWARE\Microsoft\Active Setup\Installed Components";
+    for id in (src.subkeys)(setup) {
+        let key = format!(r"{setup}\{id}");
+        if let Some(v) = (src.string)(&key, "StubPath")
+            && classify(&v).0 == Severity::High
+        {
+            out.push(deviation(
+                &key,
+                "StubPath",
+                &v,
+                "Active Setup executando um comando com padrão de malware",
+            ));
+        }
+    }
+
+    // SilentProcessExit: roda um programa quando outro termina (T1546.012).
+    let spe = r"HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\SilentProcessExit";
+    for id in (src.subkeys)(spe) {
+        let key = format!(r"{spe}\{id}");
+        if let Some(v) = (src.string)(&key, "MonitorProcess").filter(|v| !v.trim().is_empty()) {
+            out.push(deviation(&key, "MonitorProcess", &v, "Programa executado quando outro programa termina (técnica de persistência; uso legítimo é raro)"));
+        }
+    }
+
+    // Sequestro de COM por usuário (T1546.015): o HKCU vale antes do HKLM, então basta apontar uma classe para uma DLL sua.
+    let classes = r"HKCU\Software\Classes\CLSID";
+    for id in (src.subkeys)(classes) {
+        for server in ["InprocServer32", "LocalServer32"] {
+            let key = format!(r"{classes}\{id}\{server}");
+            if let Some(v) = (src.string)(&key, "").filter(|v| classify(v).0 != Severity::Info) {
+                out.push(deviation(&key, &id, &v, "Classe COM do usuário apontando para um arquivo com padrão suspeito (pode substituir a classe do sistema)"));
+            }
+        }
+    }
+
+    // Suplementos do Office (T1137): o Perf do Office Test carrega uma DLL em todo Office; nada legítimo usa.
+    let perf = r"HKCU\Software\Microsoft\Office Test\Special\Perf";
+    if let Some(v) = (src.string)(perf, "").filter(|v| !v.trim().is_empty()) {
+        out.push(deviation(perf, "(padrão)", &v, "DLL carregada em todo programa do Office (chave de teste da Microsoft, usada por malware)"));
+    }
+    for app in ["Word", "Excel", "Outlook", "PowerPoint"] {
+        let base = format!(r"HKCU\Software\Microsoft\Office\{app}\Addins");
+        for id in (src.subkeys)(&base) {
+            let key = format!(r"{base}\{id}");
+            let target = (src.string)(&key, "Manifest").or_else(|| (src.clsid)(&id));
+            if let Some(v) = target.filter(|v| classify(v).0 != Severity::Info) {
+                out.push(deviation(
+                    &key,
+                    &id,
+                    &v,
+                    "Suplemento do Office com padrão suspeito",
+                ));
+            }
+        }
+    }
+
+    // Winsock: DLL carregada por todo programa que usa rede. Só o caminho fora da pasta do sistema é desvio,
+    // mas antivírus e VPNs antigos também instalam LSP, então é indício e não veredito.
+    let catalog = r"HKLM\SYSTEM\CurrentControlSet\Services\WinSock2\Parameters";
+    for id in (src.subkeys)(&format!(r"{catalog}\Protocol_Catalog9\Catalog_Entries")) {
+        let key = format!(r"{catalog}\Protocol_Catalog9\Catalog_Entries\{id}");
+        if let Some(bytes) = (src.binary)(&key, "PackedCatalogItem") {
+            let dll = leading_text(&bytes);
+            if !dll.is_empty() && !is_system_file(&dll) {
+                out.push(deviation(&key, &id, &dll, "Provedor de serviço do Winsock (LSP) fora da pasta do Windows: vê o tráfego de rede de todos os programas"));
+            }
+        }
+    }
+    for id in (src.subkeys)(&format!(r"{catalog}\NameSpace_Catalog5\Catalog_Entries")) {
+        let key = format!(r"{catalog}\NameSpace_Catalog5\Catalog_Entries\{id}");
+        if let Some(dll) = (src.string)(&key, "LibraryPath").filter(|d| !is_system_file(d)) {
+            out.push(deviation(
+                &key,
+                &id,
+                &dll,
+                "Provedor de nomes do Winsock fora da pasta do Windows",
+            ));
+        }
+    }
+
     // Arquivos .ini herdados do Windows antigo: a seção [windows] load=/run= e o shell= do system.ini.
     let root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
     if let Some(ini) = (src.file)(&format!(r"{root}\win.ini")) {
@@ -261,6 +429,15 @@ pub fn scan() -> Vec<Finding> {
             .map(|k| k.enum_values().flatten().map(|(n, _)| n).collect())
             .unwrap_or_default()
     };
+    let binary = |key: &str, name: &str| {
+        let (h, p) = root_and_path(key);
+        RegKey::predef(h)
+            .open_subkey(p)
+            .ok()?
+            .get_raw_value(name)
+            .ok()
+            .map(|v| v.bytes)
+    };
     let file = |path: &str| {
         std::fs::read(path)
             .ok()
@@ -273,6 +450,7 @@ pub fn scan() -> Vec<Finding> {
         values: &values,
         clsid: &super::tasks_win::resolve_clsid,
         file: &file,
+        binary: &binary,
     });
     downgrade_extensions(&mut found);
     found
@@ -328,6 +506,7 @@ mod tests {
         subkeys: HashMap<String, Vec<String>>,
         clsids: HashMap<String, String>,
         files: HashMap<String, String>,
+        binaries: HashMap<(String, String), Vec<u8>>,
     }
 
     impl Fake {
@@ -339,7 +518,9 @@ mod tests {
             let values = |_: &str| Vec::new();
             let clsid = |id: &str| self.clsids.get(id).cloned();
             let file = |p: &str| self.files.get(p).cloned();
+            let binary = |a: &str, b: &str| self.binaries.get(&k(a, b)).cloned();
             evaluate(&Source {
+                binary: &binary,
                 string: &string,
                 multi: &multi,
                 subkeys: &subkeys,
@@ -406,6 +587,86 @@ mod tests {
             found
                 .iter()
                 .all(|x| x.severity >= Severity::Suspicious && x.scanner == SCANNER)
+        );
+    }
+
+    #[test]
+    fn extra_load_points_are_reported_and_defaults_are_not() {
+        let mut f = Fake::default();
+        let hk = |k: &str, n: &str| (k.to_string(), n.to_string());
+        f.strings.insert(
+            hk(r"HKLM\SOFTWARE\Microsoft\Command Processor", "AutoRun"),
+            r"C:\Users\x\AppData\a.bat".into(),
+        );
+        f.strings.insert(
+            hk(r"HKCU\Environment", "UserInitMprLogonScript"),
+            "   ".into(),
+        );
+        f.strings.insert(
+            hk(r"HKCU\Control Panel\Desktop", "SCRNSAVE.EXE"),
+            r"C:\Windows\System32\Mystify.scr".into(),
+        );
+        let mon = r"HKLM\SYSTEM\CurrentControlSet\Control\Print\Monitors";
+        f.subkeys
+            .insert(mon.into(), vec!["Evil".into(), "Local Port".into()]);
+        f.strings.insert(
+            hk(&format!(r"{mon}\Evil"), "Driver"),
+            r"C:\ProgramData\m.dll".into(),
+        );
+        f.strings.insert(
+            hk(&format!(r"{mon}\Local Port"), "Driver"),
+            "localspl.dll".into(),
+        );
+        let found = f.run();
+        let names: Vec<_> = found.iter().map(|x| x.name.as_str()).collect();
+        assert_eq!(names, ["AutoRun", "Driver"], "{found:?}");
+    }
+
+    #[test]
+    fn winsock_com_office_and_silent_exit_entries_are_reported() {
+        let mut f = Fake::default();
+        let hk = |k: &str, n: &str| (k.to_string(), n.to_string());
+        let spe = r"HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\SilentProcessExit";
+        f.subkeys.insert(spe.into(), vec!["notepad.exe".into()]);
+        f.strings.insert(
+            hk(&format!(r"{spe}\notepad.exe"), "MonitorProcess"),
+            r"C:\ProgramData\m.exe".into(),
+        );
+        let classes = r"HKCU\Software\Classes\CLSID";
+        f.subkeys
+            .insert(classes.into(), vec!["{AAAA}".into(), "{BBBB}".into()]);
+        f.strings.insert(
+            hk(&format!(r"{classes}\{{AAAA}}\InprocServer32"), ""),
+            "powershell -enc AAAA".into(),
+        );
+        f.strings.insert(
+            hk(&format!(r"{classes}\{{BBBB}}\InprocServer32"), ""),
+            r"C:\Program Files\App\ok.dll".into(),
+        );
+        f.strings.insert(
+            hk(r"HKCU\Software\Microsoft\Office Test\Special\Perf", ""),
+            r"C:\Users\x\p.dll".into(),
+        );
+        let wsock = r"HKLM\SYSTEM\CurrentControlSet\Services\WinSock2\Parameters\Protocol_Catalog9\Catalog_Entries";
+        f.subkeys.insert(
+            wsock.into(),
+            vec!["000000000001".into(), "000000000002".into()],
+        );
+        f.binaries.insert(
+            hk(&format!(r"{wsock}\000000000001"), "PackedCatalogItem"),
+            b"%SystemRoot%\\system32\\mswsock.dll\0\0junk".to_vec(),
+        );
+        f.binaries.insert(
+            hk(&format!(r"{wsock}\000000000002"), "PackedCatalogItem"),
+            b"C:\\Users\\x\\lsp.dll\0junk".to_vec(),
+        );
+        let found = f.run();
+        let mut names: Vec<_> = found.iter().map(|x| x.name.as_str()).collect();
+        names.sort();
+        assert_eq!(
+            names,
+            ["(padrão)", "000000000002", "MonitorProcess", "{AAAA}"],
+            "{found:?}"
         );
     }
 

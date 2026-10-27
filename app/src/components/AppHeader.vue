@@ -87,7 +87,7 @@ const themes: { id: Theme; icon: typeof Sun; key: string }[] = [
         <Languages class="size-4" aria-hidden="true" />
         <span class="sr-only">{{ t('header.language') }}</span>
         <select
-          class="min-h-10 rounded-lg border border-line bg-card px-2 text-fg"
+          class="field"
           :value="locale"
           @change="setLocale(($event.target as HTMLSelectElement).value as Locale)"
         >

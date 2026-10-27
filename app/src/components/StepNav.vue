@@ -29,11 +29,11 @@ const steps = [
           @click="$emit('go', s.id)"
         >
           <span
-            class="flex size-8 shrink-0 items-center justify-center rounded-full border text-xs font-bold"
-            :class="step === s.id ? 'border-primary-fg/60' : 'border-line text-muted'"
+            class="icon-tile"
+            :class="step === s.id ? 'icon-tile-on' : 'icon-tile-off'"
             aria-hidden="true"
           >
-            <component :is="s.icon" class="size-4" />
+            <component :is="s.icon" class="size-5" />
           </span>
           <span class="min-w-0">
             <span class="block text-sm leading-tight font-semibold">

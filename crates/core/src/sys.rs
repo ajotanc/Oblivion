@@ -6,6 +6,15 @@ use std::{
     time::Duration,
 };
 
+/// `Command` que não abre janela de console: sem isso, cada chamada pisca uma janela quando o programa é a interface.
+pub(crate) fn command(program: impl AsRef<std::ffi::OsStr>) -> Command {
+    #[allow(unused_mut)]
+    let mut cmd = Command::new(program);
+    #[cfg(windows)]
+    std::os::windows::process::CommandExt::creation_flags(&mut cmd, 0x0800_0000); // CREATE_NO_WINDOW
+    cmd
+}
+
 /// Roda um programa externo e devolve o que ele escreveu na saída padrão.
 /// Devolve `None` se não iniciar, passar do tempo-limite (e o processo é encerrado) ou terminar com
 /// código de saída diferente de zero: um scanner nunca pode travar por causa de um comando do sistema,
@@ -16,7 +25,7 @@ pub(crate) fn run(
     input: Option<&str>,
     timeout: Duration,
 ) -> Option<String> {
-    let mut child = Command::new(program)
+    let mut child = command(program)
         .args(args)
         .stdin(if input.is_some() {
             Stdio::piped()
@@ -53,20 +62,31 @@ pub(crate) fn run(
     }
 }
 
-/// Roda um script PowerShell trocando a codificação de entrada e saída para UTF-8.
+/// Roda um script PowerShell trocando a codificação da saída para UTF-8.
 /// Sem isso o PowerShell usa a página de código do console (ex.: 850) e acentos viram `�`.
+/// A entrada vai em hexadecimal (ASCII puro) e é decodificada como UTF-8 dentro do PowerShell: mudar
+/// `[Console]::InputEncoding` no script não vale para a entrada redirecionada, que já foi aberta com a
+/// página de código do console. O script enxerga as linhas em `$input`, como antes.
 /// O `exit 0` no fim separa erro não fatal (ex.: um arquivo que não existe, o script segue) de falha
 /// real (erro de sintaxe ou erro fatal: o `exit 0` não é alcançado e o código de saída é 1).
 #[cfg(windows)]
 pub(crate) fn powershell(script: &str, input: Option<&str>, timeout: Duration) -> Option<String> {
-    let full = format!(
-        "[Console]::InputEncoding = [Text.UTF8Encoding]::new($false); \
-         [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false); {script}\nexit 0"
-    );
+    let out_enc = "[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false);";
+    let full = if input.is_some() {
+        format!(
+            "{out_enc} $hex = [Console]::In.ReadToEnd().Trim(); \
+             $bytes = [byte[]]::new($hex.Length / 2); \
+             for ($i = 0; $i -lt $bytes.Length; $i++) {{ $bytes[$i] = [Convert]::ToByte($hex.Substring(2 * $i, 2), 16) }}; \
+             [Text.Encoding]::UTF8.GetString($bytes) -split \"`r?`n\" | & {{\n{script}\n}}\nexit 0"
+        )
+    } else {
+        format!("{out_enc} {script}\nexit 0")
+    };
+    let hex = input.map(|t| t.bytes().map(|b| format!("{b:02x}")).collect::<String>());
     run(
         "powershell",
         &["-NoProfile", "-Command", &full],
-        input,
+        hex.as_deref(),
         timeout,
     )
 }
@@ -121,6 +141,23 @@ mod tests {
     fn powershell_input_keeps_accents() {
         let out = powershell("$input", Some("C:\\José\\ç.exe"), Duration::from_secs(20)).unwrap();
         assert_eq!(out.trim(), "C:\\José\\ç.exe");
+    }
+
+    #[test]
+    fn powershell_input_arrives_as_one_item_per_line() {
+        let out = powershell(
+            "$input | ForEach-Object { \"[$_]\" }",
+            Some(
+                "a ç
+b",
+            ),
+            Duration::from_secs(20),
+        )
+        .unwrap();
+        assert_eq!(
+            out.lines().map(str::trim).collect::<Vec<_>>(),
+            ["[a ç]", "[b]"]
+        );
     }
 
     #[test]

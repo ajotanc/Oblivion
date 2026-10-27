@@ -74,12 +74,12 @@ async function doExport(): Promise<void> {
             type="search"
             autocomplete="off"
             :placeholder="t('review.searchPlaceholder')"
-            class="min-h-11 w-64 rounded-lg border border-line bg-card px-3"
+            class="field w-64"
           />
         </div>
         <div>
           <label for="origin" class="block text-xs font-semibold text-muted">{{ t('review.origin') }}</label>
-          <select id="origin" v-model="state.filters.scanner" class="min-h-11 rounded-lg border border-line bg-card px-2">
+          <select id="origin" v-model="state.filters.scanner" class="field">
             <option value="">{{ t('review.allOrigins') }}</option>
             <option v-for="s in o.origins.value" :key="s" :value="s">{{ s }}</option>
           </select>

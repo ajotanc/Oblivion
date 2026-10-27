@@ -25,7 +25,7 @@ const start = () =>
 </script>
 
 <template>
-  <section aria-labelledby="scan-title" class="flex h-full flex-col gap-4">
+  <section aria-labelledby="scan-title" class="flex h-full flex-col gap-4 overflow-y-auto">
     <div>
       <h2 id="scan-title" class="text-xl font-bold">{{ t('scan.title') }}</h2>
       <p class="mt-1 max-w-3xl text-sm text-muted">{{ t('scan.intro') }}</p>
@@ -52,8 +52,8 @@ const start = () =>
 
     <AdvancedOptions />
 
-    <div class="grid min-h-0 flex-1 gap-4 lg:grid-cols-[18rem_1fr]">
-      <ul class="space-y-1.5 text-sm" :aria-label="t('scan.title')">
+    <div class="grid flex-1 gap-4 lg:min-h-0 lg:grid-cols-[18rem_1fr] lg:grid-rows-[minmax(0,1fr)]">
+      <ul class="space-y-1.5 text-sm lg:min-h-0 lg:overflow-y-auto" :aria-label="t('scan.title')">
         <li
           v-for="(s, label) in state.scanners"
           :key="label"

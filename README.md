@@ -54,7 +54,6 @@ cargo test -p oblivion-app --lib -- --ignored real_clean   # em um terminal de a
 
 A interface é Tauri 2 + Vue 3 + TypeScript + Tailwind, chama o mesmo núcleo Rust do CLI, não abre porta de rede
 e manda ao backend só **números** de achados (o backend guarda os achados e resolve caminhos e comandos).
-Não há atualização automática: foi retirada a pedido e fica para uma fase futura.
 
 ## O que ele verifica
 
@@ -63,6 +62,7 @@ Não há atualização automática: foi retirada a pedido e fica para uma fase f
 | Inicialização | chaves Run, pasta Startup, Winlogon, IFEO, AppInit, serviços, drivers, tarefas agendadas, WMI | remove (Run, Startup, tarefa, assinatura do WMI), **desativa** serviços comuns (`Start=4`, reversível) ou restaura o padrão (Winlogon); serviços essenciais do Windows e drivers só orientam |
 | Processos | processos disfarçados de programas do Windows, assinatura digital, mineradores (CPU, GPU, rede) | encerra e move o executável |
 | Padrões do Windows | BootExecute, shell do modo seguro, pacotes do LSA, extensões do Explorer (BHO), win.ini e system.ini | restaura o padrão onde há um seguro |
+| Outros pontos de carga | AppCertDLLs, AutoRun do cmd.exe, script de logon, protetor de tela, provedores de hora, monitores de impressão, ajudantes do netsh, Active Setup, SilentProcessExit, classes COM do usuário, suplementos do Office, catálogos do Winsock | orienta (só avisa): são pontos que o Windows deixa vazios ou na pasta do sistema |
 | Defesas | Defender, UAC, firewall, Gerenciador de Tarefas, Editor de Registro, atualizações, exclusões do Defender | restaura o padrão (as exclusões do Defender só orientam) |
 | Rede | arquivo hosts, proxy, DNS fixo | comenta a linha do hosts, desliga o proxy; DNS é manual |
 | Programas conhecidos | falsos antivírus e adware de uma lista curta e curada | orienta a desinstalar |
@@ -258,15 +258,15 @@ certutil -hashfile oblivion.exe SHA256   # compare com o hash publicado na relea
 - **Remoção no Linux**: por enquanto só encerra processos (e move o executável). Cron, units do systemd e
   autostart são identificados mas ficam como instrução manual.
 - **Remoção no Windows**: não cobre extensões, drivers, exclusões do Defender, DNS, ADS, atalhos nem MBR (instrução
-  manual). Serviços e WMI são tratados, mas essa parte **só foi testada em simulação e por testes automáticos**: o teste
-  elevado `real_service_wmi_and_hosts` existe, porém ainda não foi rodado de verdade.
+  manual). Serviços, WMI e hosts são tratados e conferidos pelo teste elevado `real_service_wmi_and_hosts`
+  (rodar em terminal de administrador).
 - **Ransomware**: o Oblivion procura só **rastros** (bilhete de resgate, muitos arquivos com a mesma extensão incomum,
   comando que apaga cópias de sombra). Não percebe a criptografia enquanto acontece, **não decifra nem recupera
   arquivos**, e a lista de extensões é curta. Se o programa persistir por Run/tarefa/serviço/WMI ou estiver numa pasta
   suspeita, ele pode ser removido; a cura dos arquivos depende de backup ou de ferramenta da própria família.
 - O scan roda os scanners **em paralelo** (cerca de 6 s; o do minerador sozinho mede a CPU por 4 s). Se um
   scanner quebrar por erro interno, o relatório mostra "Scanner ... falhou" em vez de omitir essa parte.
-- Minerador: sinais Sinais: nome/argumentos, CPU sustentada, GPU em
+- Minerador: sinais: nome/argumentos, CPU sustentada, GPU em
   computação e conexão a portas de pools; um sinal fraco é SUSPEITO, dois ou mais são ALTO. A GPU é uma
   amostra única (Windows: contadores do sistema; Linux: `nvidia-smi`, só NVIDIA) e nunca foi testada com
   placa real. Mineradores renomeados, sem argumentos típicos e de baixo uso passam despercebidos.
