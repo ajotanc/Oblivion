@@ -413,7 +413,9 @@ pub(super) fn repair_hosts(entry: &str, dir: &Path) -> super::Exec {
             "Linha comentada no hosts; original guardado em {}.",
             backup.display()
         ),
-        undo: vec![json!({"kind": "hosts", "from": backup, "to": path})],
+        undo: vec![
+            json!({"kind": "hosts", "from": backup, "to": path, "applied_sha256": sha256_hex(new.as_bytes())}),
+        ],
     }
 }
 
@@ -429,9 +431,29 @@ pub(crate) fn restore_hosts(dir: &Path, entry: &serde_json::Value) -> Result<(),
             "a cópia do hosts não está dentro da quarentena (manifesto adulterado?)".into(),
         );
     }
+    let applied = entry["applied_sha256"]
+        .as_str()
+        .ok_or("registro sem o estado aplicado")?;
+    restore_if_unchanged(from, to, applied)
+}
+
+/// Só devolve o arquivo se ele ainda é exatamente o que o Oblivion gravou; senão apagaria a edição de outra pessoa.
+fn restore_if_unchanged(from: &Path, to: &Path, applied_sha256: &str) -> Result<(), String> {
+    let current = std::fs::read(to).map_err(|e| format!("não consegui ler o hosts: {e}"))?;
+    if sha256_hex(&current) != applied_sha256 {
+        return Err("o hosts mudou depois da correção do Oblivion: não sobrescrevi".into());
+    }
     std::fs::copy(from, to)
         .map(|_| ())
         .map_err(|e| format!("não consegui restaurar o hosts: {e}"))
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(bytes)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
 }
 
 // ---------- registro (Windows) ----------
@@ -552,6 +574,8 @@ mod win {
             "existed": old.is_some(),
             "vtype": old.as_ref().map(|o| o.vtype.clone() as u32),
             "data": old.as_ref().map(|o| hex(&o.bytes)),
+            // O que o Oblivion deixou lá: o `undo` só desfaz se o valor ainda for exatamente este.
+            "applied": want.as_ref().map(|w| hex(&w.bytes)),
         });
         let result = match &want {
             Some(w) => key.set_raw_value(fix.name, w),
@@ -603,6 +627,16 @@ mod win {
         let (key, _) = RegKey::predef(r)
             .create_subkey_with_flags(subkey, KEY_READ | KEY_WRITE)
             .map_err(|e| format!("não consegui abrir a chave: {e}"))?;
+        // Se alguém mexeu no valor depois da correção, desfazer sobrescreveria a mudança dele.
+        let now = key.get_raw_value(name).ok();
+        let still_ours = match (entry.get("applied"), &now) {
+            (Some(serde_json::Value::String(a)), Some(n)) => unhex(a).is_some_and(|b| b == n.bytes),
+            (Some(serde_json::Value::Null), None) => true,
+            _ => false,
+        };
+        if !still_ours {
+            return Err("o valor mudou depois da correção do Oblivion: não sobrescrevi".into());
+        }
         if entry["existed"].as_bool().unwrap_or(false) {
             let vtype = entry["vtype"].as_u64().ok_or("registro sem tipo")? as u32;
             let bytes = unhex(entry["data"].as_str().ok_or("registro sem dados")?)
@@ -767,6 +801,35 @@ mod tests {
             r"SYSTEM\CurrentControlSet\Services\a\b",
             "Start"
         ));
+    }
+
+    #[test]
+    fn the_hosts_is_restored_only_while_it_is_still_what_the_oblivion_wrote() {
+        let dir = std::env::temp_dir().join(format!("oblivion-hosts-undo-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (backup, live) = (dir.join("hosts.bak"), dir.join("hosts"));
+        std::fs::write(&backup, "original\n").unwrap();
+        std::fs::write(&live, "# [Oblivion] corrigido\n").unwrap();
+        let ours = sha256_hex(b"# [Oblivion] corrigido\n");
+
+        // Alguém editou depois: não pode ser sobrescrito.
+        std::fs::write(&live, "# [Oblivion] corrigido\n1.1.1.1 minha-linha.com\n").unwrap();
+        assert!(
+            restore_if_unchanged(&backup, &live, &ours)
+                .unwrap_err()
+                .contains("mudou")
+        );
+        assert!(
+            std::fs::read_to_string(&live)
+                .unwrap()
+                .contains("minha-linha")
+        );
+
+        // Intacto: volta ao original.
+        std::fs::write(&live, "# [Oblivion] corrigido\n").unwrap();
+        restore_if_unchanged(&backup, &live, &ours).unwrap();
+        assert_eq!(std::fs::read_to_string(&live).unwrap(), "original\n");
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

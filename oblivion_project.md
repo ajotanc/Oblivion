@@ -41,13 +41,17 @@ descontinuado. Escrito em Rust, executável local, sem rede e sem telemetria.
 | Testes repetíveis da remoção (valor Run em HKCU temporário, atalho Startup, processo filho, undo) | pronto; rodam sem administrador |
 | Scan em paralelo; scanner que quebra vira aviso "falhou", nunca some | pronto, com testes; ~6 s (antes ~12 s) |
 | Mais persistência: Policies Run, Winlogon do usuário, IFEO, AppInit_DLLs, ServiceDll, drivers de terceiros, tarefas COM, contas com perfil carregado | pronto, com testes; verificado em scan real (IFEO plantado foi achado) |
-| Testes | 204 no Windows e 145 no Linux; clippy `-D warnings` limpo |
+| Testes | 276 no núcleo (Windows), 188 no Linux e 27 no frontend; clippy `-D warnings` limpo; CI passou no GitHub |
 | Remoção no Linux de cron, systemd e autostart | pendente (hoje: instrução manual) |
-| Remoção de serviço, Winlogon, WMI, extensão e MBR | por decisão, manual (não dá para desfazer com segurança) |
+| Serviço (desativar), WMI (remover), Winlogon e valores fixos (restaurar ao padrão), hosts (comentar linha) | pronto com desfazer; **só testado em simulação e por testes automáticos**: falta rodar o teste elevado `real_service_wmi_and_hosts` |
+| Extensão de navegador, driver, exclusões do Defender, DNS e MBR | por decisão, manual |
+| Novos scanners: processos, rede, defesas, padrões do Windows, programas conhecidos, atalhos, ADS, visão cruzada de rootkit | pronto, com testes; sem falso positivo no scan desta máquina |
+| Medição de detecção (`--features bench`): 20 casos, 100%, 0 falso positivo nos controles | mede só casos que o projeto já conhece |
+| Ransomware | **não detecta nem decifra**; só remove persistência e executável em pasta suspeita |
 | Interface gráfica (Tauri 2 + Vue 3): console ao vivo, filtros, confirmação, histórico/desfazer, tema claro/escuro, pt-BR e en, versão sempre visível | pronta (v0.1); janela real abre e fecha limpa; 18 testes de frontend; a remoção pela tela só foi verificada pela lógica (o backend usa o mesmo núcleo do CLI) e no navegador com dados simulados |
 | Teste REAL da remoção pelo backend da interface (valor Run + processo; simulação, remoção, quarentena em ProgramData, listagem, desfazer, limpeza) | passou elevado (UAC); nada sobrou no sistema |
 | Contraste (WCAG AA, 2 temas) e acessibilidade (axe: 4 telas, 2 idiomas, diálogo) automatizados | prontos; o contraste achou um botão vermelho sem token de texto no tema escuro (corrigido) |
-| `pnpm audit` e CI no GitHub (Windows, Linux, frontend, cargo audit) | `pnpm audit` limpo; CI escrito, ainda não executado no GitHub |
+| `pnpm audit` e CI no GitHub (Windows, Linux, frontend, cargo audit) | `pnpm audit` limpo; CI passou no GitHub; release automática por tag (rascunho) |
 | Atualização automática | retirada a pedido; fica para uma fase futura (precisa de onde publicar e de chave de assinatura) |
 
 ## 🛠️ Stack
@@ -112,20 +116,18 @@ oblivion undo PASTA_DA_QUARENTENA
 
 * [x] `cargo test` e `cargo clippy -- -D warnings` sem falhas, no Windows e no Linux (container).
 * [x] Execução real em modo só leitura e, para a remoção, teste de ponta a ponta com itens de teste.
-* [ ] `cargo audit` (ainda não rodado).
+* [x] `cargo audit`: 0 vulnerabilidades (2 avisos, só na pilha Linux do Tauri: glib e proc-macro-error).
 * [x] Auditoria de ponta a ponta feita duas vezes; os itens críticos e recomendados foram corrigidos e testados.
 * [ ] Assinar o executável (Authenticode) quando houver certificado.
 * [x] SHA-256 do binário publicado; texto sem promessa absoluta de segurança.
 
 ## 🗺️ Próximos passos
 
-Feito na fase de paridade com o ComboFix: scanners de processos, rede (hosts/proxy/DNS) e defesas do Windows; quarentena do arquivo apontado por Run/Tarefa; licença GPL-3.0. A tabela de paridade está no README. Também prontos: `--ioc` (lista de hashes/nomes do usuário), `oblivion recent` (linha do tempo de arquivos novos) e orientação de reparo de MBR/Winsock. Também prontos: `clean --recipe` (receitas com salvaguardas) e visão cruzada de processos. Limite: rootkits de kernel não são detectados. Próximo: base de assinaturas opcional e mais tipos de receita (tarefas, serviços).
-
-
-1. Conferir a primeira execução do CI no GitHub e corrigir o que ele apontar.
-2. Definir a licença (decisão do dono do projeto) e o endereço do repositório no `Cargo.toml`.
-3. Atualização automática opt-in e assinada, quando houver onde publicar as versões.
-2. Remoção de cron, systemd e autostart no Linux, com o mesmo contrato (quarentena, undo, relatório).
-3. Detectar UEFI/BIOS legado para julgar o MBR de discos GPT com certeza.
-4. Cobrir mais pontos de persistência (`ServiceDll`, IFEO, `Policies\Explorer\Run`, outros usuários).
-5. GPU AMD/Intel no Linux (`rocm-smi`); testar em outras distros e com GPU NVIDIA real.
+1. Rodar o teste elevado (`cargo test -p oblivion-app --lib -- --ignored real_service_wmi_and_hosts`, terminal de administrador).
+2. Sinais de ransomware (nomes de bilhetes de resgate, extensões em massa, cópias de sombra apagadas) e, se
+   possível, aviso antes de criptografar (arquivos-isca). Decifrar arquivos está fora de alcance.
+3. Ampliar a base de conhecimento (`known.txt`, `hashes.txt` via `tools/refresh-iocs.ps1`).
+4. Medir de verdade em uma VM isolada (kit em `tools/sandbox/`, nunca testado) e ampliar o benchmark.
+5. Remoção de cron, systemd e autostart no Linux, com o mesmo contrato (quarentena, undo, relatório).
+6. Assinar o executável (precisa de certificado) e atualização automática opt-in (precisa de onde publicar).
+7. Detectar UEFI/BIOS legado para julgar o MBR de discos GPT; GPU AMD/Intel no Linux.

@@ -45,7 +45,7 @@ Não há atualização automática: foi retirada a pedido e fica para uma fase f
 | Inicialização | chaves Run, pasta Startup, Winlogon, IFEO, AppInit, serviços, drivers, tarefas agendadas, WMI | remove (Run, Startup, tarefa, assinatura do WMI), **desativa** serviços comuns (`Start=4`, reversível) ou restaura o padrão (Winlogon); serviços essenciais do Windows e drivers só orientam |
 | Processos | processos disfarçados de programas do Windows, assinatura digital, mineradores (CPU, GPU, rede) | encerra e move o executável |
 | Padrões do Windows | BootExecute, shell do modo seguro, pacotes do LSA, extensões do Explorer (BHO), win.ini e system.ini | restaura o padrão onde há um seguro |
-| Defesas | Defender, UAC, firewall, Gerenciador de Tarefas, Editor de Registro, atualizações | restaura o padrão |
+| Defesas | Defender, UAC, firewall, Gerenciador de Tarefas, Editor de Registro, atualizações, exclusões do Defender | restaura o padrão (as exclusões do Defender só orientam) |
 | Rede | arquivo hosts, proxy, DNS fixo | comenta a linha do hosts, desliga o proxy; DNS é manual |
 | Programas conhecidos | falsos antivírus e adware de uma lista curta e curada | orienta a desinstalar |
 | Navegadores | extensões do Chromium e do Firefox | orienta remover (não é automático: o navegador regrava as preferências e pode reinstalar) |
@@ -114,11 +114,16 @@ Durante o desenvolvimento: `cargo run -p oblivion -- scan`, `cargo test`.
    uma junção para fazer o administrador gravar em outro lugar. Duas limpezas no mesmo segundo ganham pastas
    diferentes (`q…` e `q…-1`). Arquivos movidos ganham o sufixo `.quarantined` (e perdem a permissão de execução no Linux).
 6. **`undo` desconfia do manifesto**: antes de ler, confere que a pasta (e a pasta pai) é privada, que não é
-   link e que pertence a quem executa; só devolve arquivos que estão DENTRO da quarentena, nunca para uma pasta
-   do sistema, só recria valores nas chaves Run e só recria tarefas a partir de um XML da quarentena. Nunca sobrescreve nada.
-7. **Só remove o que sabe desfazer**: valor `Run`, tarefa agendada, item da pasta Startup, processo (e o
-   executável dele, se estiver numa pasta do usuário como AppData ou Temp). Serviços, Winlogon, WMI,
-   extensões de navegador e MBR **não** são removidos sozinhos: o relatório diz o que fazer à mão.
+   link e que pertence a quem executa; só devolve arquivos que estão DENTRO da quarentena e nunca para uma pasta
+   do sistema; só recria valores nas chaves Run e só mexe em valores de registro da **lista fixa** de reparos
+   (a mesma que a limpeza usa); só recria tarefas e assinaturas do WMI a partir de arquivos da quarentena.
+   Não sobrescreve o que é de outra pessoa: se um valor do registro ou o arquivo hosts foi alterado **depois** da
+   correção do Oblivion, o `undo` recusa e explica.
+7. **Só altera o que sabe desfazer**: remove valor `Run`, tarefa agendada, item da pasta Startup, assinatura do
+   WMI e processo (e o executável dele, se estiver numa pasta do usuário como AppData ou Temp); **desativa**
+   serviços comuns (`Start=4`); e **devolve ao padrão** um conjunto fixo de valores (UAC, políticas, Defender,
+   firewall, proxy, Winlogon, BootExecute...) e comenta linhas suspeitas do hosts. Extensões de navegador, drivers,
+   exclusões do Defender, DNS, serviços essenciais e MBR **não** são alterados sozinhos: o relatório diz o que fazer à mão.
 8. Nunca move arquivo da pasta do Windows (ou `/usr`, `/etc`...), e nunca altera o MBR.
 9. Se não conseguir gravar o registro do que fez, **para** (não age sem registro).
 
@@ -153,10 +158,6 @@ e `cargo audit`. O CI só tem permissão de leitura do código.
 
 ## Publicar uma versão
 
-> Assinatura digital: opcional. Se cadastrar os segredos `WINDOWS_CERT_PFX_BASE64` e `WINDOWS_CERT_PASSWORD` no
-> repositório (Settings > Secrets and variables > Actions), o workflow assina o instalador e o CLI do Windows.
-> Sem eles, sai sem assinatura. O certificado nunca entra em arquivo do repositório.
-
 
 1. Aumente a versão nos três lugares (têm de ser iguais): `Cargo.toml` (`[workspace.package]`), `app/package.json`
    e `app/src-tauri/tauri.conf.json`.
@@ -165,7 +166,9 @@ e `cargo audit`. O CI só tem permissão de leitura do código.
    do Windows, o CLI do Windows e do Linux e o `SHA256SUMS.txt`, e cria um **rascunho** de release. Revise e publique
    pela página de Releases do GitHub; nada fica público sozinho.
 
-Os arquivos **não são assinados**: o Windows pode mostrar o aviso do SmartScreen. A lista de hashes
+Os arquivos saem **sem assinatura** por padrão (o Windows pode mostrar o aviso do SmartScreen). Se você cadastrar os
+segredos `WINDOWS_CERT_PFX_BASE64` e `WINDOWS_CERT_PASSWORD` em Settings > Secrets and variables > Actions, o
+workflow assina o instalador e o CLI do Windows; o certificado nunca entra em arquivo do repositório. A lista de hashes
 (`crates/core/data/hashes.txt`) vai como estiver no repositório no momento da tag; atualize-a antes, na sua máquina.
 
 ## Estrutura (um domínio por pasta)
@@ -174,8 +177,11 @@ Os arquivos **não são assinados**: o Windows pode mostrar o aviso do SmartScre
 crates/
   core/src/
     finding.rs, classify.rs, allow.rs, privilege.rs, restore.rs, sys.rs, trust.rs
-    scanners/   persistence_win, persistence_linux, tasks_win, wmi_win, miner, browser, firefox, mbr
-    clean/      plano, execução, quarentena e desfazer (remoção opt-in)
+    scanners/   persistence_win, persistence_linux, tasks_win, wmi_win, processes, miner, browser, firefox, mbr,
+                baseline_win, tamper_win, network, known, shortcuts_win, ads_win, rootkit
+    clean/      plano, execução, reparos (repair), WMI, quarentena e desfazer (remoção opt-in)
+    ioc.rs, recipe.rs, recent.rs   lista de indicadores, receitas e arquivos recentes
+    data/       known.txt (programas conhecidos) e hashes.txt (hashes)
     report/     text, html, clean (relatório do que foi feito)
   cli/src/      main.rs (comandos) e args.rs (leitura estrita dos argumentos)
 app/
@@ -206,7 +212,8 @@ certutil -hashfile oblivion.exe SHA256   # compare com o hash publicado na relea
 
 - Programas legítimos **sem** assinatura digital em AppData/ProgramData ainda aparecem como SUSPEITO.
   A assinatura reduz falso positivo, mas não prova inocência: malware também pode ser assinado.
-- Não faz varredura de arquivos por assinatura/hash/YARA: não é um antivírus.
+- Não varre todos os arquivos por assinatura/hash/YARA: não é um antivírus. A lista de hashes (`--ioc` e a embutida)
+  só confere os programas em execução e os executáveis citados pelos achados.
 - A detecção de elevação é um teste prático (Windows: abrir o disco cru para leitura; Linux: dono do
   processo é o root), não a leitura do token de elevação.
 - Atalhos `.lnk` da pasta Startup têm o destino resolvido; se a resolução falhar, classifica só pelo nome.
@@ -224,7 +231,12 @@ certutil -hashfile oblivion.exe SHA256   # compare com o hash publicado na relea
   padrão ou o arquivo sumiu. IFEO e AppInit_DLLs com qualquer valor são pelo menos SUSPEITOS.
 - **Remoção no Linux**: por enquanto só encerra processos (e move o executável). Cron, units do systemd e
   autostart são identificados mas ficam como instrução manual.
-- **Remoção no Windows**: não cobre serviços, Winlogon, WMI, extensões nem MBR (instrução manual).
+- **Remoção no Windows**: não cobre extensões, drivers, exclusões do Defender, DNS, ADS, atalhos nem MBR (instrução
+  manual). Serviços e WMI são tratados, mas essa parte **só foi testada em simulação e por testes automáticos**: o teste
+  elevado `real_service_wmi_and_hosts` existe, porém ainda não foi rodado de verdade.
+- **Ransomware**: o Oblivion **não detecta nem decifra ransomware**. Só reconhece um comando que apaga cópias de
+  sombra e, se o programa estiver numa pasta suspeita ou persistir por Run/tarefa/serviço/WMI, pode removê-lo.
+  Arquivos já criptografados não são recuperados.
 - O scan roda os scanners **em paralelo** (cerca de 6 s; o do minerador sozinho mede a CPU por 4 s). Se um
   scanner quebrar por erro interno, o relatório mostra "Scanner ... falhou" em vez de omitir essa parte.
 - Minerador: sinais Sinais: nome/argumentos, CPU sustentada, GPU em

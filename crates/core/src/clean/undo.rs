@@ -1,5 +1,6 @@
 //! Desfazer uma limpeza: lê o `manifest.json` da quarentena e devolve cada item ao lugar.
-//! Nunca sobrescreve: se algo já existe no destino, o item fica como está e o motivo é informado.
+//! Nunca sobrescreve o que é de outra pessoa: se algo já existe no destino, ou se um valor/arquivo que o
+//! Oblivion corrigiu foi alterado depois, o item fica como está e o motivo é informado.
 use std::{fs, path::Path};
 
 use serde_json::Value;
