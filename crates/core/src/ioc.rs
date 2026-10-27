@@ -38,7 +38,8 @@ impl Iocs {
     pub fn parse(text: &str) -> (Self, usize) {
         let mut iocs = Iocs::default();
         let mut ignored = 0;
-        for line in text.lines() {
+        // O PowerShell e o Bloco de Notas gravam UTF-8 com BOM; sem isto a primeira linha viraria "inválida".
+        for line in text.trim_start_matches('\u{feff}').lines() {
             let line = line.split('#').next().unwrap_or("").trim();
             if line.is_empty() {
                 continue;
@@ -225,6 +226,18 @@ mod tests {
         let h = found.iter().find(|f| f.name == "qualquer.bin").unwrap();
         assert_eq!(h.severity, Severity::High);
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_utf8_bom_on_the_first_line_is_tolerated() {
+        let (iocs, ignored) = Iocs::parse(&format!("\u{feff}# lista\nsha256:{EMPTY_SHA}\n"));
+        assert_eq!((iocs.hashes.len(), ignored), (1, 0));
+        let (iocs, ignored) = Iocs::parse(&format!("\u{feff}sha256:{EMPTY_SHA}\n"));
+        assert_eq!(
+            (iocs.hashes.len(), ignored),
+            (1, 0),
+            "BOM colado no primeiro hash"
+        );
     }
 
     #[test]

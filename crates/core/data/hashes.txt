@@ -1,2 +1,10 @@
-# Hashes SHA-256 de executáveis maliciosos conhecidos. Formato: um por linha, `sha256:<64 hex>`.
-# Vazia por padrão: preencha com tools/refresh-iocs.ps1 (precisa da sua conta no abuse.ch) ou use --ioc.
+﻿# Hashes SHA-256 de executÃ¡veis maliciosos recentes (MalwareBazaar, abuse.ch, CC0).
+# Gerado por tools/refresh-iocs.ps1 em 2026-10-27. Lista curta e que envelhece: nÃ£o Ã© uma base completa.
+# Formato: um hash por linha.
+sha256:49acbf8b7dc91464fb534b3dcf02f7c027115351edf9a985b182325f9ba45a73
+sha256:61a10a01cb3ef6db810baa7d3b98c2f0fd8c0618d5ea48643a15484f4ca73587
+sha256:655d159778124a3e86adaa7fb139de2c107b9936f2d719b54756de98b8135deb
+sha256:a1ee29422bc3dbc934431d9aafef188691a7873328f83571367b545aa2470617
+sha256:af1ece5ba03ca91f50c213f39794da1932bc2e2dd5d6da1fd834c8d58239f9bd
+sha256:bb22b8f178e265e711d75d84e62914b68d68182d67c644723049c6a3ddf6c1e8
+sha256:f610872cc9f55574e1d325e2e4ea1c0878c155dbd3e43211adbf3cf58a9f19fe
