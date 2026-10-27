@@ -16,6 +16,12 @@ administrador), cria o atalho do programa e põe o comando `oblivion` no PATH do
 A desinstalação remove os arquivos e a entrada do PATH. Para **remover** itens do sistema, execute como administrador
 (a interface oferece reiniciar como administrador).
 
+**Aviso do Windows ("O Windows protegeu o computador"):** o instalador **não é assinado digitalmente** (certificado
+custa dinheiro e, mesmo assinado, o SmartScreen só para de avisar depois que o arquivo acumula downloads). O aviso é esperado.
+Antes de seguir, **confira o SHA-256** do arquivo com o `SHA256SUMS.txt` da mesma página (`certutil -hashfile arquivo SHA256`);
+se bater, clique em **Mais informações → Executar assim mesmo**. Se não bater, não execute. Tudo é código aberto:
+o instalador é gerado pelo workflow público do repositório.
+
 **Linux:** baixe `oblivion-linux-x64.tar.gz`, extraia e rode `sudo ./oblivion scan` (só a linha de comando).
 
 Também sai solto o `oblivion-windows-x64.exe` (o mesmo CLI, sem instalar), para quem prefere um arquivo portátil.

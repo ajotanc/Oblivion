@@ -35,7 +35,7 @@ descontinuado. Escrito em Rust, executável local, sem rede e sem telemetria.
 | **Desfazer** (`undo`) a partir do `manifest.json` da quarentena | pronto; verificado nos dois sistemas |
 | Relatório do que foi feito (terminal, HTML, e `report.html` dentro da quarentena) | pronto |
 | Leitura estrita dos argumentos (opção desconhecida = erro) | pronto, com testes |
-| Instalador único do Windows (interface + CLI + comando `oblivion` no PATH do usuário, sem administrador) e CLI portátil | gerado e conferido por dentro (7-Zip); **instalação real não testada**; sem assinatura digital |
+| Instalador único do Windows (interface + CLI + comando `oblivion` no PATH do usuário, sem administrador) e CLI portátil | instalação e desinstalação reais testadas (PATH volta idêntico, sem sobras); sem assinatura digital (SmartScreen avisa; README orienta conferir o SHA-256) |
 | Quarentena privada (admin/root), `undo` que não obedece manifesto adulterado, nomes únicos por execução | pronto; verificado no Windows (permissões lidas por SID) e no Linux (modo 700) |
 | `--yes` seguro: processos só por sinal forte; URL sozinha é SUSPEITO; órfã só com a unidade presente; ancestrais não são marcados como minerador | pronto, com testes |
 | Testes repetíveis da remoção (valor Run em HKCU temporário, atalho Startup, processo filho, undo) | pronto; rodam sem administrador |

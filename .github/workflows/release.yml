@@ -140,8 +140,9 @@ jobs:
           cat > notes.md <<'EOF'
           Software livre (GPL-3.0). Os resultados são indícios, não veredito, e o programa vem sem garantia.
 
-          **Os arquivos não são assinados digitalmente**: o Windows pode mostrar um aviso do SmartScreen.
-          Confira o SHA-256 de cada arquivo com `SHA256SUMS.txt` antes de executar.
+          **Os arquivos não são assinados digitalmente**, então o Windows pode mostrar o aviso "O Windows protegeu o
+          computador" (SmartScreen). É esperado. Confira o SHA-256 do arquivo com o `SHA256SUMS.txt` abaixo
+          (`certutil -hashfile arquivo SHA256`); se bater, use **Mais informações → Executar assim mesmo**.
 
           - `*-setup.exe`: **instalador único do Windows**: interface + linha de comando. Instala para o seu usuário (sem pedir administrador) e coloca o comando `oblivion` no PATH (abra um terminal novo). A desinstalação remove tudo, inclusive a entrada do PATH.
           - `oblivion-windows-x64.exe`: só a linha de comando, sem instalar (a mesma que está dentro do instalador).
