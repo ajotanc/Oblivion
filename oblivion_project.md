@@ -119,6 +119,9 @@ oblivion undo PASTA_DA_QUARENTENA
 
 ## 🗺️ Próximos passos
 
+Feito na fase de paridade com o ComboFix: scanners de processos, rede (hosts/proxy/DNS) e defesas do Windows; quarentena do arquivo apontado por Run/Tarefa; licença GPL-3.0. A tabela de paridade está no README. Também prontos: `--ioc` (lista de hashes/nomes do usuário), `oblivion recent` (linha do tempo de arquivos novos) e orientação de reparo de MBR/Winsock. Também prontos: `clean --recipe` (receitas com salvaguardas) e visão cruzada de processos. Limite: rootkits de kernel não são detectados. Próximo: base de assinaturas opcional e mais tipos de receita (tarefas, serviços).
+
+
 1. Conferir a primeira execução do CI no GitHub e corrigir o que ele apontar.
 2. Definir a licença (decisão do dono do projeto) e o endereço do repositório no `Cargo.toml`.
 3. Atualização automática opt-in e assinada, quando houver onde publicar as versões.

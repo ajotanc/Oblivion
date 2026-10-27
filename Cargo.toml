@@ -6,7 +6,9 @@ resolver = "3"
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-# `license` e `repository` ficam em aberto atÃ© o dono do projeto decidir (licenÃ§a) e o repositÃ³rio existir.
+license = "GPL-3.0-only"
+repository = "https://github.com/ajotanc/Oblivion"
+authors = ["Alerson Jorge"]
 
 [profile.release]
 lto = true

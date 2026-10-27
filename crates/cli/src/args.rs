@@ -14,9 +14,11 @@ use Kind::{Repeat, Switch, Value};
 /// Opções aceitas por comando. `None` = comando desconhecido.
 fn spec(command: &str) -> Option<&'static [(&'static str, Kind)]> {
     Some(match command {
-        "scan" => &[("--html", Value), ("--allow", Value)],
+        "scan" => &[("--html", Value), ("--allow", Value), ("--ioc", Value)],
         "clean" => &[
             ("--allow", Value),
+            ("--ioc", Value),
+            ("--recipe", Value),
             ("--only", Repeat),
             ("--dry-run", Switch),
             ("--yes", Switch),
@@ -24,6 +26,7 @@ fn spec(command: &str) -> Option<&'static [(&'static str, Kind)]> {
             ("--report", Value),
             ("--quarantine-dir", Value),
         ],
+        "recent" => &[("--days", Value)],
         "undo" | "restore-point" => &[],
         _ => return None,
     })

@@ -93,6 +93,34 @@ comando inteira do achado (copie o "alvo" do relatório), sem diferenciar maiús
 prefixo. Itens SUSPEITOS que casam passam a INFO; ALTOS nunca são escondidos. Casar por "contém" foi
 descartado de propósito: um malware poderia escapar só citando o seu padrão como argumento.
 
+## Paridade com o ComboFix
+
+| ComboFix | Oblivion | Estado |
+|---|---|---|
+| Ponto de restauração antes de mexer | `restore-point` | pronto |
+| Entradas de inicialização (Run, Winlogon, IFEO, AppInit, serviços, drivers) | scanner de persistência + remoção com quarentena | pronto |
+| Tarefas agendadas e WMI | scanners de tarefas e WMI + remoção | pronto |
+| Processos disfarçados / Kill-All | scanner de processos (nome de sistema em pasta errada, assinatura digital) | pronto |
+| Arquivo hosts, proxy, DNS | scanner de rede (manual) | pronto |
+| Defender, UAC, firewall, políticas bloqueadas | scanner de defesas do Windows (manual) | pronto |
+| Setor de boot (MBR) | leitura e verificação | pronto (sem reparo) |
+| Navegadores | extensões do Chromium e do Firefox | pronto |
+| Minerador (extra, não existia no ComboFix) | CPU, memória, GPU e rede | pronto |
+| Listas de assinaturas (rogues, srizbi, CLSID) | `--ioc ARQUIVO`: sua lista de hashes SHA-256 e nomes (o Oblivion não traz lista pronta) | pronto |
+| Relatório de arquivos recentes (Find3M) | `oblivion recent [--days N]` | pronto |
+| Script de correção (CFScript) | `clean --recipe ARQUIVO`: linhas `valor:`, `inicializacao:`, `processo:`; sempre confirma item a item, sem caminho livre | pronto |
+| Reparo de MBR e Winsock | orientação passo a passo no relatório; o Oblivion não grava no disco de boot | pronto (manual) |
+| Rootkits | visão cruzada de processos (API x WMI no Windows; /proc x teste por PID no Linux) e valores Run com nome oculto; **não detecta rootkits de kernel** | pronto (limitado) |
+
+Nada disso vem do código do ComboFix: foi tudo reescrito a partir do que ele fazia.
+## Licença
+
+Oblivion é software livre, sob a **GNU General Public License v3.0 (somente)**; veja o arquivo [LICENSE](LICENSE).
+Em resumo: você pode usar, estudar, modificar e redistribuir; quem distribuir uma versão modificada deve
+mantê-la sob a mesma licença e fornecer o código-fonte. O programa vem **sem garantia** (texto da licença,
+seções 15 e 16): uma ferramenta que remove itens do sistema deve ser usada com cuidado e com backup.
+O código é original; o ComboFix serviu só para estudar como ele funcionava, e nenhum código ou dado dele é distribuído aqui.
+
 ## Verificações automáticas (CI)
 
 O GitHub Actions (`.github/workflows/ci.yml`) roda a cada envio: tipos, build e testes da interface, `pnpm audit`,

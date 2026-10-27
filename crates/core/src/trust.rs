@@ -28,7 +28,7 @@ pub fn exe_path(command: &str) -> Option<&str> {
 }
 
 /// Caminhos (em minúsculas) com assinatura válida. Falha do PowerShell = nenhum confiável (seguro).
-fn signed_paths(paths: &[String]) -> HashSet<String> {
+pub(crate) fn signed_paths(paths: &[String]) -> HashSet<String> {
     let script = "$input | ForEach-Object { Get-AuthenticodeSignature -LiteralPath $_ } | \
         Where-Object { $_.Status -eq 'Valid' } | ForEach-Object { $_.Path }";
     let Some(out) = sys::powershell(script, Some(&paths.join("\n")), Duration::from_secs(30))

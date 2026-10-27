@@ -2,10 +2,14 @@
 name = "oblivion-core"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55"
 
 [dependencies]
 serde_json = "1.0.154"
+sha2 = "0.10.9"
 sysinfo = { version = "0.39.6", default-features = false, features = ["system"] }

@@ -34,13 +34,59 @@ pub fn execute(plan: &Plan, f: &Finding, dir: &Path) -> Exec {
     match plan {
         Plan::Process { pid } => kill_process(*pid, f, dir),
         #[cfg(windows)]
-        Plan::RunValue { hive, subkey, name } => win::run_value(hive, subkey, name, f, dir),
+        Plan::RunValue {
+            hive, subkey, name, ..
+        } => with_target_file(win::run_value(hive, subkey, name, f, dir), f, dir),
         #[cfg(windows)]
-        Plan::Task { name } => win::task(name, f, dir),
+        Plan::Task { name, .. } => with_target_file(win::task(name, f, dir), f, dir),
         #[cfg(windows)]
         Plan::Startup { path } => win::startup(path, dir),
         _ => skipped("ação não disponível neste sistema"),
     }
+}
+
+// ---------- arquivo apontado pela entrada ----------
+
+/// Pode este arquivo ir para a quarentena? Só em pastas onde o usuário (ou um malware com as permissões
+/// dele) grava; nunca na pasta do Windows nem em `ProgramData\Microsoft` (é onde mora o Windows Defender).
+#[cfg_attr(not(windows), allow(dead_code))] // só o Windows usa
+pub(crate) fn is_movable_location(p: &Path) -> bool {
+    is_user_location(p) && !is_system_path(p) && !norm(p).contains(r"\programdata\microsoft\")
+}
+
+/// O arquivo apontado pela entrada, se existir e puder ir para a quarentena junto com ela.
+#[cfg(windows)]
+pub(crate) fn target_file(command: &str) -> Option<PathBuf> {
+    let p = Path::new(crate::trust::exe_path(command)?);
+    (p.is_absolute() && p.is_file() && is_movable_location(p)).then(|| p.to_path_buf())
+}
+
+#[cfg(not(windows))]
+pub(crate) fn target_file(_command: &str) -> Option<PathBuf> {
+    None
+}
+
+/// Depois de apagar a entrada, move o arquivo que ela apontava (se for movível), com desfazer.
+/// Falha ao mover não desfaz a remoção da entrada: vira uma nota.
+#[cfg(windows)]
+fn with_target_file(mut e: Exec, f: &Finding, dir: &Path) -> Exec {
+    if e.outcome != Outcome::Done {
+        return e;
+    }
+    if let Some(file) = target_file(&f.target) {
+        match quarantine_file(&file, dir, "files") {
+            Ok(dest) => {
+                e.note
+                    .push_str(&format!(" Arquivo movido para {}.", dest.display()));
+                e.undo.push(move_undo(&dest, &file));
+            }
+            Err(err) => e.note.push_str(&format!(
+                " Não consegui mover o arquivo {}: {err}.",
+                file.display()
+            )),
+        }
+    }
+    e
 }
 
 // ---------- caminhos ----------
@@ -740,6 +786,65 @@ mod tests {
         }
 
         #[test]
+        fn removing_a_run_value_also_moves_the_file_it_pointed_to() {
+            let dir = temp_dir("regfile");
+            let exe = dir.join("alvo-teste.exe");
+            fs::write(&exe, b"MZ").unwrap();
+            let data = exe.display().to_string();
+            let v = TestValue::new("file", &data, false);
+            let plan = Plan::RunValue {
+                hive: "HKCU".into(),
+                subkey: RUN.into(),
+                name: v.0.clone(),
+                file: target_file(&data),
+            };
+            assert!(
+                plan.describe().contains("e mover o arquivo"),
+                "{}",
+                plan.describe()
+            );
+
+            let e = execute(&plan, &run_finding(&v.0, &data), &dir.join("q"));
+            assert_eq!(e.outcome, Outcome::Done, "{e:?}");
+            assert!(v.read().is_none(), "o valor foi apagado");
+            assert!(!exe.exists(), "o arquivo apontado foi para a quarentena");
+            assert_eq!(
+                e.undo.len(),
+                2,
+                "um desfazer para o valor e outro para o arquivo"
+            );
+            assert_eq!(e.undo[1]["kind"], "move");
+            let stored = PathBuf::from(e.undo[1]["from"].as_str().unwrap());
+            assert!(stored.is_file() && stored.to_string_lossy().ends_with(".quarantined"));
+            fs::rename(&stored, &exe).unwrap(); // o caminho de volta guardado está certo
+            fs::remove_dir_all(&dir).unwrap();
+        }
+
+        #[test]
+        fn the_target_file_is_left_alone_when_it_is_a_system_file_or_missing() {
+            assert_eq!(target_file(r"C:\Windows\System32\cmd.exe /c x"), None);
+            assert_eq!(
+                target_file("powershell.exe -nop -enc AAAA"),
+                None,
+                "caminho relativo nunca é movido"
+            );
+            assert_eq!(target_file(r"C:\oblivion-nao-existe\a.exe"), None);
+            let dir = temp_dir("regfile2");
+            let e = execute(
+                &Plan::RunValue {
+                    hive: "HKCU".into(),
+                    subkey: RUN.into(),
+                    name: "OblivionTeste-nao-existe".into(),
+                    file: None,
+                },
+                &run_finding("x", "y"),
+                &dir,
+            );
+            assert!(matches!(e.outcome, Outcome::Skipped(_)));
+            fs::remove_dir_all(&dir).ok();
+        }
+
+        #[test]
         fn restore_refuses_registry_keys_outside_run() {
             // O caso da auditoria: manifesto adulterado apontando para outra chave.
             let entry = json!({"kind": "run_value", "hive": "HKCU", "subkey": r"SOFTWARE\OblivionTesteFora", "name": "x", "data": "y", "expand": false});
@@ -803,6 +908,35 @@ mod tests {
             ));
             assert!(!dir.join("tasks").exists(), "nada foi guardado");
             fs::remove_dir_all(&dir).ok();
+        }
+    }
+
+    #[test]
+    fn only_user_writable_folders_are_movable_never_system_or_defender_files() {
+        let (system, program_data, local) = if cfg!(windows) {
+            (
+                std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into()),
+                std::env::var("ProgramData").unwrap_or_else(|_| r"C:\ProgramData".into()),
+                std::env::var("LOCALAPPDATA")
+                    .unwrap_or_else(|_| r"C:\Users\x\AppData\Local".into()),
+            )
+        } else {
+            ("/usr".into(), "/home/x/pd".into(), "/tmp".into())
+        };
+        let sep = if cfg!(windows) { r"\" } else { "/" };
+        let p = |root: &str, rest: &str| PathBuf::from(format!("{root}{sep}{rest}"));
+        assert!(is_movable_location(&p(&local, "Temp/malware.exe")));
+        assert!(!is_movable_location(&p(&system, "System32/cmd.exe")));
+        if cfg!(windows) {
+            // O Windows Defender e outros componentes da Microsoft ficam em ProgramData\Microsoft.
+            assert!(!is_movable_location(&p(
+                &program_data,
+                r"Microsoft\Windows Defender\Platform\MsMpEng.exe"
+            )));
+            assert!(is_movable_location(&p(
+                &program_data,
+                r"Fornecedor\app.exe"
+            )));
         }
     }
 

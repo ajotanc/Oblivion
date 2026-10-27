@@ -79,6 +79,14 @@ pub fn scan() -> Vec<Finding> {
     out
 }
 
+/// Rootkits de registro usam nomes com caractere nulo ou de controle: o Editor de Registro não mostra
+/// o valor inteiro, mas o Windows o executa.
+const HIDDEN_NAME_REASON: &str = "O nome do valor tem caractere nulo ou invisível (técnica para esconder a entrada do Editor de Registro)";
+
+fn has_hidden_chars(name: &str) -> bool {
+    name.chars().any(char::is_control)
+}
+
 fn scan_run_keys(out: &mut Vec<Finding>) {
     for (hive_name, hive, subkey) in RUN_KEYS {
         let Ok(key) = RegKey::predef(*hive).open_subkey(subkey) else {
@@ -88,7 +96,11 @@ fn scan_run_keys(out: &mut Vec<Finding>) {
             let Ok(target) = key.get_value::<String, _>(&name) else {
                 continue;
             };
-            let (severity, reason) = classify(&target);
+            let (severity, reason) = if has_hidden_chars(&name) {
+                (Severity::High, HIDDEN_NAME_REASON)
+            } else {
+                classify(&target)
+            };
             out.push(Finding {
                 scanner: SCANNER,
                 location: format!(r"{hive_name}\{subkey}"),
@@ -411,6 +423,13 @@ fn scan_other_users(out: &mut Vec<Finding>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn value_names_with_nul_or_control_chars_are_hidden_names() {
+        assert!(has_hidden_chars("Updater\0"));
+        assert!(has_hidden_chars("a\u{7}b"));
+        assert!(!has_hidden_chars("OneDrive"));
+    }
 
     #[test]
     fn policies_and_wow64_run_keys_are_read_and_removable_like_the_others() {

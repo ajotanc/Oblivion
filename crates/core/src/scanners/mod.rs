@@ -2,9 +2,14 @@ mod browser;
 mod firefox;
 mod mbr;
 mod miner;
+mod network;
 mod persistence_linux;
 #[cfg(windows)]
 pub(crate) mod persistence_win;
+mod processes;
+mod rootkit;
+#[cfg(windows)]
+mod tamper_win;
 #[cfg(windows)]
 pub(crate) mod tasks_win;
 #[cfg(windows)]
@@ -45,6 +50,8 @@ fn failed_scanner(scanner: &'static str, label: &str) -> Finding {
         reason: "O scanner parou por um erro interno; essa parte NÃO foi verificada",
     }
 }
+
+pub(crate) use processes::is_critical as is_critical_process;
 
 /// Roda os scanners ao mesmo tempo (o do minerador sozinho leva ~5 s medindo a CPU) e junta os achados.
 fn run_parallel(jobs: Vec<Job>, on_progress: &(dyn Fn(Progress) + Sync)) -> Vec<Finding> {
@@ -110,6 +117,17 @@ pub fn scan_all_with(on_progress: &(dyn Fn(Progress) + Sync)) -> Vec<Finding> {
             "minerador",
             Box::new(miner::scan),
         ),
+        (
+            "Processos em execução",
+            "processos",
+            Box::new(processes::scan),
+        ),
+        ("Rede (hosts, proxy, DNS)", "rede", Box::new(network::scan)),
+        (
+            "Processos escondidos (visão cruzada)",
+            "rootkit",
+            Box::new(rootkit::scan),
+        ),
     ];
     #[cfg(windows)]
     {
@@ -119,6 +137,11 @@ pub fn scan_all_with(on_progress: &(dyn Fn(Progress) + Sync)) -> Vec<Finding> {
             Box::new(startup_windows),
         ));
         jobs.push(("WMI", "wmi", Box::new(wmi_win::scan)));
+        jobs.push((
+            "Defesas do Windows (Defender, UAC, firewall)",
+            "seguranca",
+            Box::new(tamper_win::scan),
+        ));
     }
     #[cfg(unix)]
     jobs.push((

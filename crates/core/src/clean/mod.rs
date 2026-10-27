@@ -29,9 +29,12 @@ pub enum Plan {
         hive: String,
         subkey: String,
         name: String,
+        /// Arquivo apontado pela entrada, se puder ir para a quarentena junto.
+        file: Option<PathBuf>,
     },
     Task {
         name: String,
+        file: Option<PathBuf>,
     },
     Startup {
         path: PathBuf,
@@ -50,12 +53,19 @@ impl Plan {
 
     pub fn describe(&self) -> String {
         match self {
-            Plan::RunValue { hive, subkey, name } => format!(
-                "Apagar o valor \"{name}\" de {hive}\\{subkey} (o valor fica guardado na quarentena)"
+            Plan::RunValue {
+                hive,
+                subkey,
+                name,
+                file,
+            } => format!(
+                "Apagar o valor \"{name}\" de {hive}\\{subkey} (o valor fica guardado na quarentena){}",
+                with_file(file)
             ),
-            Plan::Task { name } => {
-                format!("Apagar a tarefa agendada \"{name}\" (o XML fica guardado na quarentena)")
-            }
+            Plan::Task { name, file } => format!(
+                "Apagar a tarefa agendada \"{name}\" (o XML fica guardado na quarentena){}",
+                with_file(file)
+            ),
             Plan::Startup { path } => format!("Mover \"{}\" para a quarentena", path.display()),
             Plan::Process { pid } => format!(
                 "Encerrar o processo {pid} e mover o executável para a quarentena (se estiver numa pasta do usuário)"
@@ -63,6 +73,13 @@ impl Plan {
             Plan::Manual(text) => (*text).to_string(),
         }
     }
+}
+
+/// Trecho do texto de confirmação quando o arquivo apontado também vai para a quarentena.
+fn with_file(file: &Option<PathBuf>) -> String {
+    file.as_ref()
+        .map(|p| format!(" e mover o arquivo \"{}\" para a quarentena", p.display()))
+        .unwrap_or_default()
 }
 
 /// `PID 123 | RAM 4 MB` -> 123.
@@ -92,6 +109,7 @@ fn persistence_plan(f: &Finding) -> Plan {
                 hive: hive.to_uppercase(),
                 subkey: subkey.to_string(),
                 name: f.name.clone(),
+                file: exec::target_file(&f.target),
             };
         }
     }
@@ -104,14 +122,27 @@ pub fn plan(f: &Finding) -> Option<Plan> {
         return None;
     }
     Some(match f.scanner {
-        "minerador" => pid_from_location(&f.location)
+        "minerador" | "processos" => pid_from_location(&f.location)
             .map_or(Plan::Manual("Encerre o processo manualmente."), |pid| {
                 Plan::Process { pid }
             }),
         "tarefas" => Plan::Task {
             name: f.name.clone(),
+            file: exec::target_file(&f.target),
         },
         "persistencia" => persistence_plan(f),
+        "rootkit" => Plan::Manual(
+            "Reinicie e rode o scan de novo; se o PID continuar sumindo de uma das listas, analise a partir de um sistema limpo (disco de recuperação). O Oblivion não consegue ver rootkits de kernel.",
+        ),
+        "ioc" => Plan::Manual(
+            "Confirme o arquivo (por exemplo em um serviço de análise) e remova-o por conta própria; o Oblivion não apaga por lista externa.",
+        ),
+        "rede" => Plan::Manual(
+            "Corrija o arquivo hosts, o proxy ou o DNS pelas configurações do Windows e descubra quem os alterou; se foi você ou sua empresa, ignore. Se a internet foi desviada, `netsh winsock reset` (como administrador) também desfaz filtros de rede injetados.",
+        ),
+        "seguranca" => Plan::Manual(
+            "Restaure a configuração pelo próprio Windows (Segurança do Windows ou Política de Grupo) e investigue quem a alterou; se foi você ou sua empresa, ignore.",
+        ),
         "wmi" => Plan::Manual(
             "Remova o consumidor e o vínculo em root/subscription (Remove-CimInstance) depois de confirmar que não são de um programa seu.",
         ),
@@ -119,7 +150,7 @@ pub fn plan(f: &Finding) -> Option<Plan> {
             Plan::Manual("Remova a extensão pelo próprio navegador (menu de extensões).")
         }
         "mbr" => Plan::Manual(
-            "Não altere o MBR com ferramenta genérica: restaure o carregador de boot oficial ou use um disco de recuperação.",
+            "O Oblivion não grava no setor de boot (um erro deixa o PC sem iniciar). Se confirmar o problema, inicie pelo disco de instalação/recuperação do Windows e use o Prompt de Comando: bootrec /fixmbr e bootrec /fixboot (no Linux, reinstale o GRUB). Faça backup antes.",
         ),
         _ => Plan::Manual("Verifique manualmente."),
     })
@@ -436,7 +467,8 @@ mod tests {
         assert_eq!(
             plan(&f),
             Some(Plan::Task {
-                name: r"Vendor\Updater".into()
+                name: r"Vendor\Updater".into(),
+                file: None
             })
         );
     }
@@ -456,7 +488,8 @@ mod tests {
             Some(Plan::RunValue {
                 hive: "HKCU".into(),
                 subkey: r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run".into(),
-                name: "Valor".into()
+                name: "Valor".into(),
+                file: None
             })
         );
         let startup = finding(
@@ -492,9 +525,21 @@ mod tests {
                 .contains("Encerrar o processo 7")
         );
         assert!(
-            Plan::Task { name: "T".into() }
-                .describe()
-                .contains("quarentena")
+            Plan::Task {
+                name: "T".into(),
+                file: None
+            }
+            .describe()
+            .contains("quarentena")
+        );
+        let with = Plan::Task {
+            name: "T".into(),
+            file: Some(PathBuf::from(r"C:\Users\x\evil.exe")),
+        }
+        .describe();
+        assert!(
+            with.contains("e mover o arquivo \"C:\\Users\\x\\evil.exe\" para a quarentena"),
+            "{with}"
         );
         assert_eq!(Plan::Manual("faça X").describe(), "faça X");
     }
