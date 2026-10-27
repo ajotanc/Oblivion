@@ -15,6 +15,7 @@
 /app/node_modules/
 /app/dist/
 /app/src-tauri/gen/
+/app/src-tauri/resources/
 
 # Executáveis: vão em "Releases" com o hash, não no código
 /dist/

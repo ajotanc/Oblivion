@@ -8,6 +8,18 @@ Utilitário de diagnóstico e limpeza de segurança, escrito em Rust, para Windo
 
 Os achados são indícios, não veredito. Nenhuma ferramenta detecta "qualquer malware".
 
+## Instalação
+
+**Windows:** baixe o instalador `Oblivion_<versão>_x64-setup.exe` da página de Releases e confira o SHA-256 com o
+`SHA256SUMS.txt`. **Um instalador só** coloca a interface e a linha de comando: instala para o seu usuário (não pede
+administrador), cria o atalho do programa e põe o comando `oblivion` no PATH do usuário (abra um terminal novo para usar).
+A desinstalação remove os arquivos e a entrada do PATH. Para **remover** itens do sistema, execute como administrador
+(a interface oferece reiniciar como administrador).
+
+**Linux:** baixe `oblivion-linux-x64.tar.gz`, extraia e rode `sudo ./oblivion scan` (só a linha de comando).
+
+Também sai solto o `oblivion-windows-x64.exe` (o mesmo CLI, sem instalar), para quem prefere um arquivo portátil.
+
 ## Interface gráfica
 
 O Oblivion tem uma interface com um console que mostra o log da varredura ao vivo:
@@ -169,8 +181,8 @@ e `cargo audit`. O CI só tem permissão de leitura do código.
 1. Aumente a versão nos três lugares (têm de ser iguais): `Cargo.toml` (`[workspace.package]`), `app/package.json`
    e `app/src-tauri/tauri.conf.json`.
 2. Envie e crie a tag: `git tag v0.2.0 && git push origin v0.2.0`.
-3. O workflow `.github/workflows/release.yml` confere a tag contra as versões, roda os testes, gera o instalador
-   do Windows (**só da interface**; o CLI não vai dentro dele), o CLI do Windows e do Linux como arquivos separados e o `SHA256SUMS.txt`, e cria um **rascunho** de release. Revise e publique
+3. O workflow `.github/workflows/release.yml` confere a tag contra as versões, roda os testes, gera o **instalador único do
+   Windows** (interface + CLI), o CLI portátil do Windows, o CLI do Linux e o `SHA256SUMS.txt`, e cria um **rascunho** de release. Revise e publique
    pela página de Releases do GitHub; nada fica público sozinho.
 
 Os arquivos saem **sem assinatura** por padrão (o Windows pode mostrar o aviso do SmartScreen). Se você cadastrar os
@@ -207,8 +219,9 @@ app/
 
 ## Executável
 
-`cargo build --release` gera o CLI em `target/release/oblivion.exe`; a interface sai com `pnpm tauri build`
-(dentro de `app/`). Os binários **não ficam no repositório**: devem ir em "Releases" junto do SHA-256. Confira o
+`cargo build --release` gera o CLI em `target/release/oblivion.exe`. O **instalador único** (interface + CLI +
+comando no PATH) sai com `.\tools\build-installer.ps1` (ele compila o CLI, embute no instalador e usa
+`app/src-tauri/tauri.release.conf.json`); `pnpm tauri build` sozinho gera só a interface. Os binários **não ficam no repositório**: devem ir em "Releases" junto do SHA-256. Confira o
 hash antes de usar; o executável **não é assinado digitalmente**, então o SmartScreen ou o antivírus podem alertar:
 
 ```bash

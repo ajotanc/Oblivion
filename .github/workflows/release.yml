@@ -50,14 +50,13 @@ jobs:
         working-directory: app
       # Mesma verificação do CI: não gera release de código que não passa nos testes.
       - run: cargo test --workspace
-      - run: pnpm tauri build
-        working-directory: app
+      # 1) O CLI primeiro: ele vai DENTRO do instalador (e também sai solto, para uso sem instalar).
       - run: cargo build --release -p oblivion
       # Assinatura digital OPCIONAL: só roda se você cadastrar os dois segredos no repositório
       # (Settings > Secrets and variables > Actions): WINDOWS_CERT_PFX_BASE64 (o .pfx em base64) e
-      # WINDOWS_CERT_PASSWORD. Sem eles, os arquivos saem sem assinatura, como antes. Nunca coloque o
-      # certificado ou a senha em arquivo do repositório.
-      - name: Assina os executáveis (se houver certificado)
+      # WINDOWS_CERT_PASSWORD. Sem eles, os arquivos saem sem assinatura. Nunca coloque o certificado ou a
+      # senha em arquivo do repositório. O CLI é assinado ANTES de entrar no instalador.
+      - name: Assina o CLI (se houver certificado)
         if: ${{ env.HAS_CERT == 'true' }}
         shell: pwsh
         env:
@@ -67,11 +66,29 @@ jobs:
           $pfx = Join-Path $env:RUNNER_TEMP 'cert.pfx'
           [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:CERT_B64))
           $signtool = (Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe' | Sort-Object FullName | Select-Object -Last 1).FullName
-          $files = @((Get-ChildItem target/release/bundle/nsis/*-setup.exe).FullName, (Resolve-Path target/release/oblivion.exe).Path)
-          foreach ($f in $files) {
-            & $signtool sign /f $pfx /p $env:CERT_PASS /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 $f
-            if ($LASTEXITCODE -ne 0) { throw "Falhou ao assinar $f" }
-          }
+          & $signtool sign /f $pfx /p $env:CERT_PASS /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 (Resolve-Path target/release/oblivion.exe).Path
+          if ($LASTEXITCODE -ne 0) { throw 'Falhou ao assinar o CLI' }
+          Remove-Item $pfx -Force
+      # 2) Instalador único: interface + CLI (em <instalação>\cli) + comando `oblivion` no PATH do usuário.
+      - name: Embute o CLI no instalador
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force app/src-tauri/resources | Out-Null
+          Copy-Item target/release/oblivion.exe app/src-tauri/resources/oblivion.exe
+      - run: pnpm tauri build --config src-tauri/tauri.release.conf.json
+        working-directory: app
+      - name: Assina o instalador (se houver certificado)
+        if: ${{ env.HAS_CERT == 'true' }}
+        shell: pwsh
+        env:
+          CERT_B64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
+          CERT_PASS: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP 'cert.pfx'
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:CERT_B64))
+          $signtool = (Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe' | Sort-Object FullName | Select-Object -Last 1).FullName
+          & $signtool sign /f $pfx /p $env:CERT_PASS /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 (Get-ChildItem target/release/bundle/nsis/*-setup.exe).FullName
+          if ($LASTEXITCODE -ne 0) { throw 'Falhou ao assinar o instalador' }
           Remove-Item $pfx -Force
       - name: Reúne os arquivos
         shell: pwsh
@@ -126,8 +143,8 @@ jobs:
           **Os arquivos não são assinados digitalmente**: o Windows pode mostrar um aviso do SmartScreen.
           Confira o SHA-256 de cada arquivo com `SHA256SUMS.txt` antes de executar.
 
-          - `*-setup.exe`: instalador do Windows, **só da interface** (a linha de comando não vai dentro dele).
-          - `oblivion-windows-x64.exe`: só a linha de comando, sem instalar.
+          - `*-setup.exe`: **instalador único do Windows**: interface + linha de comando. Instala para o seu usuário (sem pedir administrador) e coloca o comando `oblivion` no PATH (abra um terminal novo). A desinstalação remove tudo, inclusive a entrada do PATH.
+          - `oblivion-windows-x64.exe`: só a linha de comando, sem instalar (a mesma que está dentro do instalador).
           - `oblivion-linux-x64.tar.gz`: linha de comando do Linux (use com `sudo` para ter funcionalidade total).
           EOF
           gh release create "$GITHUB_REF_NAME" dist-release/* \
