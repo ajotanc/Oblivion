@@ -5,6 +5,26 @@ const HIGH: &[(&str, &str)] = &[
     (" -enc", "PowerShell com comando codificado"),
     ("-encodedcommand", "PowerShell com comando codificado"),
     ("mshta", "Executa HTA, usado para rodar script remoto"),
+    (
+        "javascript:",
+        "Executa JavaScript pela linha de comando (técnica com rundll32/mshta)",
+    ),
+    (
+        "scrobj",
+        "Carrega um scriptlet (técnica do regsvr32 para rodar script remoto)",
+    ),
+    (
+        "invoke-expression",
+        "PowerShell executando texto como código",
+    ),
+    (
+        "frombase64string",
+        "PowerShell decodificando comando escondido",
+    ),
+    (
+        "process call create",
+        "Cria processo pelo WMI (executa sem janela)",
+    ),
     ("\\temp\\", "Executa a partir de pasta temporária"),
     ("%temp%", "Executa a partir de pasta temporária"),
     ("%tmp%", "Executa a partir de pasta temporária"),
@@ -34,6 +54,8 @@ fn has_url(c: &str) -> bool {
 const SCRIPT: &[(&str, &str)] = &[
     ("wscript", "Interpretador de script do Windows"),
     ("cscript", "Interpretador de script do Windows"),
+    ("-windowstyle hidden", "PowerShell com janela oculta"),
+    (" -w hidden", "PowerShell com janela oculta"),
     (".vbs", "Arquivo de script"),
     (".js", "Arquivo de script"),
     (".bat", "Arquivo de script"),
@@ -323,6 +345,32 @@ mod tests {
         assert!(!is_system_script(
             r"cmd /c %systemroot%\system32\a.cmd https://x.example"
         ));
+    }
+
+    /// Todo padrão ALTO da tabela tem de classificar como ALTO quando aparece numa linha de comando, e todo
+    /// padrão de script como SUSPEITO. Orientado pela tabela de propósito: o arquivo não precisa trazer
+    /// linhas de ataque escritas por extenso (antivírus costumam reclamar delas).
+    #[test]
+    fn every_pattern_in_the_tables_classifies_as_its_tier() {
+        for (pattern, _) in HIGH {
+            let cmd = format!("programa.exe {pattern} argumento");
+            assert_eq!(classify(&cmd).0, Severity::High, "{pattern}");
+        }
+        for (pattern, _) in SCRIPT {
+            let cmd = format!("programa.exe {pattern}");
+            assert!(classify(&cmd).0 >= Severity::Suspicious, "{pattern}");
+        }
+    }
+
+    #[test]
+    fn ordinary_commands_stay_info() {
+        for cmd in [
+            r#""C:\Program Files\App\app.exe" --minimized"#,
+            r"C:\Windows\System32\rundll32.exe C:\Windows\System32\shell32.dll,Control_RunDLL",
+            r"C:\Windows\explorer.exe",
+        ] {
+            assert_eq!(classify(cmd).0, Severity::Info, "{cmd}");
+        }
     }
 
     #[test]
