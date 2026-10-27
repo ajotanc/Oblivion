@@ -45,6 +45,9 @@ descontinuado. Escrito em Rust, executável local, sem rede e sem telemetria.
 | Remoção no Linux de cron, systemd e autostart | pendente (hoje: instrução manual) |
 | Remoção de serviço, Winlogon, WMI, extensão e MBR | por decisão, manual (não dá para desfazer com segurança) |
 | Interface gráfica (Tauri 2 + Vue 3): console ao vivo, filtros, confirmação, histórico/desfazer, tema claro/escuro, pt-BR e en, versão sempre visível | pronta (v0.1); janela real abre e fecha limpa; 18 testes de frontend; a remoção pela tela só foi verificada pela lógica (o backend usa o mesmo núcleo do CLI) e no navegador com dados simulados |
+| Teste REAL da remoção pelo backend da interface (valor Run + processo; simulação, remoção, quarentena em ProgramData, listagem, desfazer, limpeza) | passou elevado (UAC); nada sobrou no sistema |
+| Contraste (WCAG AA, 2 temas) e acessibilidade (axe: 4 telas, 2 idiomas, diálogo) automatizados | prontos; o contraste achou um botão vermelho sem token de texto no tema escuro (corrigido) |
+| `pnpm audit` e CI no GitHub (Windows, Linux, frontend, cargo audit) | `pnpm audit` limpo; CI escrito, ainda não executado no GitHub |
 | Atualização automática | retirada a pedido; fica para uma fase futura (precisa de onde publicar e de chave de assinatura) |
 
 ## 🛠️ Stack
@@ -116,8 +119,9 @@ oblivion undo PASTA_DA_QUARENTENA
 
 ## 🗺️ Próximos passos
 
-1. Testar a remoção pela interface de ponta a ponta no Windows (administrador) e gerar o instalador (`pnpm tauri build`).
-2. Atualização automática opt-in e assinada, quando houver onde publicar as versões.
+1. Conferir a primeira execução do CI no GitHub e corrigir o que ele apontar.
+2. Definir a licença (decisão do dono do projeto) e o endereço do repositório no `Cargo.toml`.
+3. Atualização automática opt-in e assinada, quando houver onde publicar as versões.
 2. Remoção de cron, systemd e autostart no Linux, com o mesmo contrato (quarentena, undo, relatório).
 3. Detectar UEFI/BIOS legado para julgar o MBR de discos GPT com certeza.
 4. Cobrir mais pontos de persistência (`ServiceDll`, IFEO, `Policies\Explorer\Run`, outros usuários).

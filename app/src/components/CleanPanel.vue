@@ -69,7 +69,7 @@ const needsAdmin = () => state.info !== null && !state.info.elevated
         </button>
         <button
           type="button"
-          class="min-h-11 rounded-lg bg-high px-4 font-semibold text-white disabled:opacity-50 dark:text-black"
+          class="min-h-11 rounded-lg bg-high px-4 font-semibold text-high-fg disabled:opacity-50"
           :disabled="state.cleaning || needsAdmin()"
           data-testid="remove"
           @click="openDialog"
@@ -144,7 +144,7 @@ const needsAdmin = () => state.info !== null && !state.info.elevated
         </button>
         <button
           type="button"
-          class="min-h-11 rounded-lg bg-high px-4 font-semibold text-white disabled:opacity-50 dark:text-black"
+          class="min-h-11 rounded-lg bg-high px-4 font-semibold text-high-fg disabled:opacity-50"
           :disabled="!understood"
           data-testid="confirm"
           @click="confirm"

@@ -13,6 +13,7 @@
   --primary: #1d4ed8;
   --primary-fg: #ffffff;
   --high: #b42318;
+  --high-fg: #ffffff;
   --high-bg: #fde8e6;
   --susp: #92400e;
   --susp-bg: #fef3c7;
@@ -36,6 +37,7 @@
   --primary: #6b96ff;
   --primary-fg: #08122b;
   --high: #ff8a80;
+  --high-fg: #1a0a08;
   --high-bg: #3b1613;
   --susp: #fbbf24;
   --susp-bg: #3a2a07;
@@ -58,6 +60,7 @@
     --primary: #6b96ff;
     --primary-fg: #08122b;
     --high: #ff8a80;
+    --high-fg: #1a0a08;
     --high-bg: #3b1613;
     --susp: #fbbf24;
     --susp-bg: #3a2a07;
@@ -80,6 +83,7 @@
   --color-primary: var(--primary);
   --color-primary-fg: var(--primary-fg);
   --color-high: var(--high);
+  --color-high-fg: var(--high-fg);
   --color-high-bg: var(--high-bg);
   --color-susp: var(--susp);
   --color-susp-bg: var(--susp-bg);

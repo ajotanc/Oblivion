@@ -141,7 +141,7 @@ async fn run_scan(app: AppHandle, state: State<'_, AppState>) -> Result<Vec<Find
     Ok(dtos)
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 #[serde(rename_all = "camelCase")]
 struct RecordDto {
     name: String,
@@ -153,7 +153,7 @@ struct RecordDto {
     note: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 #[serde(rename_all = "camelCase")]
 struct CleanDto {
     dry_run: bool,
@@ -214,6 +214,50 @@ fn select(findings: &[Finding], ids: &[usize]) -> Result<Vec<Finding>, String> {
     Ok(chosen)
 }
 
+/// Executa a limpeza (bloqueante). Fica fora do comando Tauri para poder ser testada sem a janela.
+fn clean_blocking(chosen: Vec<Finding>, dry_run: bool) -> Result<CleanDto, String> {
+    // O usuário já confirmou na tela, item a item; aqui a confirmação é sempre "sim".
+    let opts = clean::Options {
+        only: Vec::new(),
+        dry_run,
+        yes_for_safe: false,
+    };
+    if dry_run {
+        let dir = clean::default_root().join("simulacao");
+        let r = clean::run(
+            &chosen,
+            &opts,
+            &dir,
+            "não necessário (simulação)",
+            &mut |_, _| true,
+            &mut exec::execute,
+        );
+        return Ok(to_clean_dto(&r));
+    }
+    if !privilege::is_elevated() {
+        return Err(format!(
+            "A remoção exige administrador/root. {}",
+            privilege::alert()
+        ));
+    }
+    let restore_text = match restore::create() {
+        Ok(r) => r.describe().to_string(),
+        Err(e) => return Err(format!("Não removo nada sem ponto de restauração: {e}")),
+    };
+    let dir = clean::create_session(&clean::default_root())
+        .map_err(|e| format!("Não consegui criar uma quarentena privada: {e}"))?;
+    let r = clean::run(
+        &chosen,
+        &opts,
+        &dir,
+        &restore_text,
+        &mut |_, _| true,
+        &mut exec::execute,
+    );
+    let _ = std::fs::write(dir.join("report.html"), report::clean::html(&r));
+    Ok(to_clean_dto(&r))
+}
+
 #[tauri::command]
 async fn run_clean(
     state: State<'_, AppState>,
@@ -227,53 +271,11 @@ async fn run_clean(
             .map_err(|_| "estado interno bloqueado")?,
         &ids,
     )?;
-    // O usuário já confirmou na tela, item a item; aqui a confirmação é sempre "sim".
-    tauri::async_runtime::spawn_blocking(move || -> Result<CleanDto, String> {
-        let opts = clean::Options {
-            only: Vec::new(),
-            dry_run,
-            yes_for_safe: false,
-        };
-        if dry_run {
-            let dir = clean::default_root().join("simulacao");
-            let r = clean::run(
-                &chosen,
-                &opts,
-                &dir,
-                "não necessário (simulação)",
-                &mut |_, _| true,
-                &mut exec::execute,
-            );
-            return Ok(to_clean_dto(&r));
-        }
-        if !privilege::is_elevated() {
-            return Err(format!(
-                "A remoção exige administrador/root. {}",
-                privilege::alert()
-            ));
-        }
-        let restore_text = match restore::create() {
-            Ok(r) => r.describe().to_string(),
-            Err(e) => return Err(format!("Não removo nada sem ponto de restauração: {e}")),
-        };
-        let dir = clean::create_session(&clean::default_root())
-            .map_err(|e| format!("Não consegui criar uma quarentena privada: {e}"))?;
-        let r = clean::run(
-            &chosen,
-            &opts,
-            &dir,
-            &restore_text,
-            &mut |_, _| true,
-            &mut exec::execute,
-        );
-        let _ = std::fs::write(dir.join("report.html"), report::clean::html(&r));
-        Ok(to_clean_dto(&r))
-    })
-    .await
-    .map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || clean_blocking(chosen, dry_run))
+        .await
+        .map_err(|e| e.to_string())?
 }
-
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 #[serde(rename_all = "camelCase")]
 struct QuarantineDto {
     name: String,
@@ -321,7 +323,7 @@ fn quarantine_path(root: &Path, requested: &str) -> Result<PathBuf, String> {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 #[serde(rename_all = "camelCase")]
 struct UndoDto {
     description: String,
@@ -329,13 +331,10 @@ struct UndoDto {
     error: Option<String>,
 }
 
-#[tauri::command]
-async fn undo_quarantine(path: String) -> Result<Vec<UndoDto>, String> {
-    let dir = quarantine_path(&clean::default_root(), &path)?;
-    let results = tauri::async_runtime::spawn_blocking(move || undo::undo(&dir))
-        .await
-        .map_err(|e| e.to_string())??;
-    Ok(results
+/// Desfaz uma quarentena. Só aceita uma pasta diretamente dentro da raiz das quarentenas.
+fn undo_dir(path: &str) -> Result<Vec<UndoDto>, String> {
+    let dir = quarantine_path(&clean::default_root(), path)?;
+    Ok(undo::undo(&dir)?
         .into_iter()
         .map(|r| UndoDto {
             description: safe(&r.description),
@@ -345,6 +344,12 @@ async fn undo_quarantine(path: String) -> Result<Vec<UndoDto>, String> {
         .collect())
 }
 
+#[tauri::command]
+async fn undo_quarantine(path: String) -> Result<Vec<UndoDto>, String> {
+    tauri::async_runtime::spawn_blocking(move || undo_dir(&path))
+        .await
+        .map_err(|e| e.to_string())?
+}
 /// Grava o relatório HTML em `Documentos\Oblivion` e devolve o caminho.
 #[tauri::command]
 fn export_report(state: State<'_, AppState>) -> Result<String, String> {
@@ -366,18 +371,27 @@ fn export_report(state: State<'_, AppState>) -> Result<String, String> {
     Ok(path.display().to_string())
 }
 
+/// Comando do PowerShell que reabre o programa pedindo administrador. As aspas simples do caminho são
+/// dobradas: sem isso um caminho com `'` terminaria o texto e o resto virava comando.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn restart_command(exe: &str) -> String {
+    format!(
+        "Start-Process -FilePath '{}' -Verb RunAs",
+        exe.replace('\'', "''")
+    )
+}
+
 /// Reabre o próprio programa pedindo administrador (o Windows mostra a janela do UAC; quem decide é o usuário).
 #[tauri::command]
 fn restart_as_admin(app: AppHandle) -> Result<(), String> {
     #[cfg(windows)]
     {
         let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-        let exe = exe.display().to_string().replace('\'', "''");
         std::process::Command::new("powershell")
             .args([
                 "-NoProfile",
                 "-Command",
-                &format!("Start-Process -FilePath '{exe}' -Verb RunAs"),
+                &restart_command(&exe.display().to_string()),
             ])
             .spawn()
             .map_err(|e| e.to_string())?;
@@ -540,6 +554,171 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
+    #[test]
+    fn restart_command_quotes_the_path_so_it_cannot_inject_commands() {
+        assert_eq!(
+            restart_command(r"C:\Program Files\Oblivion\oblivion.exe"),
+            r"Start-Process -FilePath 'C:\Program Files\Oblivion\oblivion.exe' -Verb RunAs"
+        );
+        // O caso perigoso: um caminho com aspa simples tentaria fechar o texto e rodar outro comando.
+        let evil = restart_command("C:\\x'; Remove-Item C:\\ -Recurse; '.exe");
+        assert!(evil.contains("x''; Remove-Item"), "{evil}");
+        assert!(evil.starts_with("Start-Process -FilePath '") && evil.ends_with("' -Verb RunAs"));
+    }
+
+    #[test]
+    fn undo_refuses_paths_that_are_not_quarantines() {
+        for bad in [
+            "",
+            "..",
+            r"C:\Windows",
+            "/etc",
+            r"C:\nao-existe-oblivion\q1",
+        ] {
+            assert!(undo_dir(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn a_non_elevated_real_clean_is_refused_before_touching_anything() {
+        if privilege::is_elevated() {
+            return; // sob administrador este teste não se aplica
+        }
+        let chosen = vec![finding(
+            "x",
+            "minerador",
+            "PID 4000000000 | RAM 1 MB",
+            Severity::High,
+        )];
+        let e = clean_blocking(chosen.clone(), false).unwrap_err();
+        assert!(e.contains("exige administrador"), "{e}");
+        // A simulação funciona sem administrador e não cria quarentena.
+        let dry = clean_blocking(chosen, true).unwrap();
+        assert!(dry.dry_run && dry.quarantine_dir.is_none());
+    }
+
+    /// Teste REAL da remoção pelo backend da interface. Altera o sistema (cria e remove itens de teste,
+    /// cria uma quarentena e, se preciso, um ponto de restauração), por isso só roda quando pedido e
+    /// elevado: `oblivion_app_lib --ignored real_clean`.
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "altera o sistema: rode só elevado, de propósito"]
+    fn real_clean_and_undo_roundtrip_as_administrator() {
+        use std::{process::Command, thread::sleep, time::Duration};
+        use winreg::{RegKey, enums::*};
+
+        struct Cleanup {
+            value: String,
+            dirs: Vec<std::path::PathBuf>,
+            child: Option<std::process::Child>,
+        }
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                if let Ok(k) = RegKey::predef(HKEY_CURRENT_USER).open_subkey_with_flags(
+                    r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run",
+                    KEY_WRITE,
+                ) {
+                    let _ = k.delete_value(&self.value);
+                }
+                if let Some(c) = self.child.as_mut() {
+                    let _ = c.kill();
+                    let _ = c.wait();
+                }
+                for d in &self.dirs {
+                    let _ = std::fs::remove_dir_all(d);
+                }
+            }
+        }
+
+        assert!(privilege::is_elevated(), "este teste exige administrador");
+        let pid = std::process::id();
+        let value = format!("OblivionGuiE2E-{pid}");
+        let work = std::env::temp_dir().join(format!("oblivion-gui-e2e-{pid}"));
+        let mut guard = Cleanup {
+            value: value.clone(),
+            dirs: vec![work.clone()],
+            child: None,
+        };
+
+        let run = RegKey::predef(HKEY_CURRENT_USER)
+            .open_subkey_with_flags(
+                r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run",
+                KEY_ALL_ACCESS,
+            )
+            .unwrap();
+        run.set_value(&value, &r"C:\oblivion-gui-e2e\gone.exe")
+            .unwrap();
+        std::fs::create_dir_all(&work).unwrap();
+        let exe = work.join("xmrig-guie2e.exe");
+        std::fs::copy(r"C:\Windows\System32\ping.exe", &exe).unwrap();
+        guard.child = Some(
+            Command::new(&exe)
+                .args(["-t", "127.0.0.1"])
+                .spawn()
+                .unwrap(),
+        );
+        sleep(Duration::from_secs(2));
+
+        // Só os itens de teste entram na escolha: nada do sistema real é tocado.
+        let findings = scanners::scan_all();
+        let ours: Vec<usize> = findings
+            .iter()
+            .enumerate()
+            .filter(|(_, f)| {
+                let n = f.name.to_lowercase();
+                n.contains("oblivionguie2e") || n.contains("xmrig-guie2e")
+            })
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(ours.len(), 2, "esperava o valor Run e o processo: {ours:?}");
+        let chosen = select(&findings, &ours).unwrap();
+
+        let dry = clean_blocking(chosen.clone(), true).unwrap();
+        assert!(dry.records.iter().all(|r| r.outcome == "dryRun"));
+        assert!(
+            run.get_raw_value(&value).is_ok(),
+            "a simulação não pode alterar nada"
+        );
+
+        let done = clean_blocking(chosen, false).unwrap();
+        assert!(done.aborted.is_none(), "{:?}", done.aborted);
+        assert!(
+            done.records.iter().all(|r| r.outcome == "done"),
+            "{:?}",
+            done.records
+                .iter()
+                .map(|r| (&r.name, &r.outcome_label))
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            run.get_raw_value(&value).is_err(),
+            "o valor Run foi apagado"
+        );
+        sleep(Duration::from_millis(500));
+        assert!(
+            guard.child.as_mut().unwrap().try_wait().unwrap().is_some(),
+            "o processo foi encerrado"
+        );
+        assert!(!exe.exists(), "o executável foi para a quarentena");
+
+        let qdir = done.quarantine_dir.clone().expect("quarentena");
+        guard.dirs.push(PathBuf::from(&qdir));
+        assert!(
+            list_quarantines()
+                .unwrap()
+                .iter()
+                .any(|q| q.path == qdir && q.done == 2)
+        );
+        assert!(Path::new(&qdir).join("report.html").is_file());
+
+        let undone = undo_dir(&qdir).unwrap();
+        assert!(undone.iter().all(|u| u.ok), "{undone:?}");
+        assert!(
+            run.get_raw_value(&value).is_ok(),
+            "o desfazer recriou o valor Run"
+        );
+        assert!(exe.exists(), "o desfazer devolveu o executável");
+    }
     #[test]
     fn app_info_exposes_the_workspace_version() {
         assert_eq!(app_info().version, env!("CARGO_PKG_VERSION"));

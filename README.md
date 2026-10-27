@@ -21,8 +21,17 @@ administrador; a simulação funciona sem ele.
 cd app
 pnpm install
 pnpm tauri dev       # abre a janela (desenvolvimento)
-pnpm tauri build     # gera o instalador
+pnpm tauri build     # gera o instalador (NSIS)
 pnpm test            # testes do frontend (Vitest)
+```
+
+Testes da interface: filtros, fluxo da tela, tradução (as chaves de pt-BR e en têm de ser iguais), **contraste
+das cores** (WCAG AA em todos os pares de texto, nos dois temas) e **acessibilidade com o axe-core** (zero
+violações nas quatro telas, nos dois idiomas e com o diálogo aberto). No backend há um teste **real** da
+remoção, que só roda elevado e de propósito (ele cria itens de teste, remove, confere a quarentena, desfaz e limpa):
+
+```bash
+cargo test -p oblivion-app --lib -- --ignored real_clean   # em um terminal de administrador
 ```
 
 A interface é Tauri 2 + Vue 3 + TypeScript + Tailwind, chama o mesmo núcleo Rust do CLI, não abre porta de rede
@@ -83,6 +92,12 @@ Arquivo de texto, um padrão por linha (`#` comenta). O padrão deve ser **igual
 comando inteira do achado (copie o "alvo" do relatório), sem diferenciar maiúsculas; um `*` no fim vale como
 prefixo. Itens SUSPEITOS que casam passam a INFO; ALTOS nunca são escondidos. Casar por "contém" foi
 descartado de propósito: um malware poderia escapar só citando o seu padrão como argumento.
+
+## Verificações automáticas (CI)
+
+O GitHub Actions (`.github/workflows/ci.yml`) roda a cada envio: tipos, build e testes da interface, `pnpm audit`,
+`cargo fmt`, `clippy` com avisos como erro e os testes Rust no Windows (workspace inteiro) e no Linux (núcleo e CLI),
+e `cargo audit`. O CI só tem permissão de leitura do código.
 
 ## Estrutura (um domínio por pasta)
 
