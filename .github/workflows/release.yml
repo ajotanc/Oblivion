@@ -1,0 +1,113 @@
+name: Release
+
+# Roda quando você cria uma tag de versão (ex.: v0.2.0). Gera o instalador do Windows, o CLI dos dois
+# sistemas e o arquivo de somas SHA-256, e cria um RASCUNHO de release: nada fica público até você revisar
+# e publicar. Não há atualização automática no programa.
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  version:
+    name: Confere se a tag bate com a versão do projeto
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Versões
+        run: |
+          cargo_v=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          tauri_v=$(grep -m1 '"version"' app/src-tauri/tauri.conf.json | cut -d'"' -f4)
+          pkg_v=$(grep -m1 '"version"' app/package.json | cut -d'"' -f4)
+          echo "tag=$GITHUB_REF_NAME cargo=$cargo_v tauri=$tauri_v package=$pkg_v"
+          for v in "$cargo_v" "$tauri_v" "$pkg_v"; do
+            [ "v$v" = "$GITHUB_REF_NAME" ] || { echo "::error::A tag $GITHUB_REF_NAME não bate com a versão $v"; exit 1; }
+          done
+
+  windows:
+    name: Windows (instalador e CLI)
+    needs: version
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: app/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+        working-directory: app
+      # Mesma verificação do CI: não gera release de código que não passa nos testes.
+      - run: cargo test --workspace
+      - run: pnpm tauri build
+        working-directory: app
+      - run: cargo build --release -p oblivion
+      - name: Reúne os arquivos
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory dist-release | Out-Null
+          Copy-Item (Get-ChildItem target/release/bundle/nsis/*-setup.exe).FullName dist-release/
+          Copy-Item target/release/oblivion.exe dist-release/oblivion-windows-x64.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist-release/*
+
+  linux:
+    name: Linux (CLI)
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: sudo apt-get update && sudo apt-get install -y iproute2
+      - run: cargo test -p oblivion-core -p oblivion
+      - run: cargo build --release -p oblivion
+      - run: |
+          mkdir dist-release
+          tar -C target/release -czf dist-release/oblivion-linux-x64.tar.gz oblivion
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: dist-release/*
+
+  release:
+    name: Cria o rascunho da release
+    needs: [windows, linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # só este job pode criar a release
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist-release
+          merge-multiple: true
+      - name: Somas SHA-256
+        working-directory: dist-release
+        run: sha256sum -- * > SHA256SUMS.txt && cat SHA256SUMS.txt
+      - name: Rascunho
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cat > notes.md <<'EOF'
+          Software livre (GPL-3.0). Os resultados são indícios, não veredito, e o programa vem sem garantia.
+
+          **Os arquivos não são assinados digitalmente**: o Windows pode mostrar um aviso do SmartScreen.
+          Confira o SHA-256 de cada arquivo com `SHA256SUMS.txt` antes de executar.
+
+          - `*-setup.exe`: instalador do Windows (interface + CLI).
+          - `oblivion-windows-x64.exe`: só a linha de comando, sem instalar.
+          - `oblivion-linux-x64.tar.gz`: linha de comando do Linux (use com `sudo` para ter funcionalidade total).
+          EOF
+          gh release create "$GITHUB_REF_NAME" dist-release/* \
+            --repo "$GITHUB_REPOSITORY" --draft --verify-tag \
+            --title "Oblivion $GITHUB_REF_NAME" --notes-file notes.md --generate-notes

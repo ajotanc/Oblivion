@@ -143,6 +143,18 @@ O GitHub Actions (`.github/workflows/ci.yml`) roda a cada envio: tipos, build e 
 `cargo fmt`, `clippy` com avisos como erro e os testes Rust no Windows (workspace inteiro) e no Linux (núcleo e CLI),
 e `cargo audit`. O CI só tem permissão de leitura do código.
 
+## Publicar uma versão
+
+1. Aumente a versão nos três lugares (têm de ser iguais): `Cargo.toml` (`[workspace.package]`), `app/package.json`
+   e `app/src-tauri/tauri.conf.json`.
+2. Envie e crie a tag: `git tag v0.2.0 && git push origin v0.2.0`.
+3. O workflow `.github/workflows/release.yml` confere a tag contra as versões, roda os testes, gera o instalador
+   do Windows, o CLI do Windows e do Linux e o `SHA256SUMS.txt`, e cria um **rascunho** de release. Revise e publique
+   pela página de Releases do GitHub; nada fica público sozinho.
+
+Os arquivos **não são assinados**: o Windows pode mostrar o aviso do SmartScreen. A lista de hashes
+(`crates/core/data/hashes.txt`) vai como estiver no repositório no momento da tag; atualize-a antes, na sua máquina.
+
 ## Estrutura (um domínio por pasta)
 
 ```text
