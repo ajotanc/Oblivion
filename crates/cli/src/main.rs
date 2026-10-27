@@ -11,6 +11,7 @@ use args::Parsed;
 use oblivion_core::{
     allow,
     clean::{self, Outcome, exec, undo},
+    explain,
     finding::Finding,
     ioc, privilege, recent, recipe, report, restore, scanners,
 };
@@ -23,7 +24,7 @@ const USAGE: &str = concat!(
       Varre o sistema e mostra o que encontrou. SOMENTE LEITURA: nada é alterado.
 
   oblivion clean [--dry-run] [--only TEXTO]... [--yes] [--report ARQUIVO] [--allow ARQUIVO] [--ioc ARQUIVO]
-                 [--recipe ARQUIVO]
+                 [--recipe ARQUIVO] [--recommended]
                  [--no-restore-point] [--quarantine-dir PASTA]
       Procura e REMOVE o que for encontrado, com a sua confirmação item a item. Antes cria um
       ponto de restauração e guarda tudo o que apagou em uma quarentena (dá para desfazer).
@@ -44,6 +45,7 @@ const USAGE: &str = concat!(
 --allow: arquivo de texto com um padrão por linha (# comenta). O padrão deve ser IGUAL ao nome ou à
 linha de comando inteira do achado (copie o \"alvo\" do relatório); um `*` no fim vale como prefixo.
 Itens SUSPEITOS que casam passam a INFO. Itens ALTOS nunca são escondidos.
+--recommended: trata só os itens recomendados (sinal forte e ação que dá para desfazer). Ainda pergunta, a menos que use --yes.
 --recipe: em vez de varrer, remove SÓ o que o seu arquivo pede (uma linha por item: `valor: CHAVE_RUN | Nome`,
 `inicializacao: arquivo.lnk`, `processo: nome.exe`; # comenta). Sempre pergunta item a item (--yes não vale),
 e usa ponto de restauração, quarentena e undo. Não aceita caminho livre nem processos do Windows.
@@ -189,10 +191,14 @@ fn scan(p: &Parsed) -> ExitCode {
 /// Pergunta ao usuário, mostrando o que será feito. Sem resposta clara (ou sem entrada), é "não".
 fn ask(f: &Finding, action: &str) -> bool {
     use report::text::clean as safe;
+    let x = explain::explain(f);
     println!(
-        "\n[{}] {}\n    alvo:   {}\n    motivo: {}\n    ação:   {}",
+        "\n[{}] {}{}\n    o que é:  {}\n    se tratar: {}\n    alvo:     {}\n    motivo:   {}\n    ação:     {}",
         f.severity.label(),
         safe(&f.name),
+        if x.recommended { "  (recomendado)" } else { "" },
+        safe(&x.what),
+        safe(&x.impact),
         safe(&f.target),
         safe(f.reason),
         safe(action)
@@ -249,6 +255,22 @@ fn clean_command(p: &Parsed) -> ExitCode {
             },
             &|_| {},
         )
+    };
+
+    // `--recommended`: só os itens de sinal forte e ação reversível (o mesmo que o botão da interface seleciona).
+    let findings = if p.has("--recommended") {
+        let total = findings.len();
+        let kept: Vec<_> = findings
+            .into_iter()
+            .filter(explain::is_recommended)
+            .collect();
+        eprintln!(
+            "--recommended: {} item(ns) recomendado(s) de {total} achados.",
+            kept.len()
+        );
+        kept
+    } else {
+        findings
     };
 
     let only: Vec<String> = p.values("--only").into_iter().map(String::from).collect();

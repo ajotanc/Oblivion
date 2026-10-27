@@ -144,6 +144,12 @@ function selectVisible(): void {
   state.selected = new Set([...state.selected, ...visible])
 }
 
+/** Marca só os itens recomendados (sinal forte e ação reversível), junto com o que já estava marcado. */
+function selectRecommended(): void {
+  const ids = state.findings.filter((f) => f.recommended && f.actionable).map((f) => f.id)
+  state.selected = new Set([...state.selected, ...ids])
+}
+
 function clearSelection(): void {
   state.selected = new Set()
 }
@@ -204,6 +210,7 @@ export function useOblivion() {
     loadRecent,
     toggleSelect,
     selectVisible,
+    selectRecommended,
     clearSelection,
     runClean,
     loadQuarantines,

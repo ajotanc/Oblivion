@@ -15,6 +15,12 @@ export interface Finding {
   actionable: boolean
   /** Processo marcado só por sinais fracos (CPU/GPU): a tela avisa para conferir antes de encerrar. */
   weakSignal: boolean
+  /** O que é, em linguagem simples. */
+  what: string
+  /** O que acontece se o item for tratado. */
+  impact: string
+  /** Sinal forte e ação reversível: o botão "Selecionar recomendados" marca estes. */
+  recommended: boolean
 }
 
 /** Resultado de uma varredura ou de uma receita: os itens e os avisos para mostrar ao usuário. */

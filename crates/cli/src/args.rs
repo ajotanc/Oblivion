@@ -19,6 +19,7 @@ fn spec(command: &str) -> Option<&'static [(&'static str, Kind)]> {
             ("--allow", Value),
             ("--ioc", Value),
             ("--recipe", Value),
+            ("--recommended", Switch),
             ("--only", Repeat),
             ("--dry-run", Switch),
             ("--yes", Switch),

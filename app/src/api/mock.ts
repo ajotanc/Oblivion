@@ -2,7 +2,13 @@ import type { Api } from './index'
 import type { CleanResult, Finding, ScanResult } from '../types'
 
 /** Dados simulados, usados só quando a tela abre fora do app (pré-visualização no navegador e testes). */
-type Sample = Omit<Finding, 'id' | 'weakSignal'> & { weakSignal?: boolean }
+type Sample = Omit<Finding, 'id' | 'weakSignal' | 'what' | 'impact' | 'recommended'> & { weakSignal?: boolean }
+
+const explainSample = (f: Sample): Pick<Finding, 'what' | 'impact' | 'recommended'> => ({
+  what: f.severity === 'high' ? 'Um programa está configurado para rodar sozinho. O sinal é forte.' : 'Pode ser legítimo: veja se você reconhece o nome e o caminho.',
+  impact: f.actionable ? 'O item vai para a quarentena e dá para desfazer.' : 'O Oblivion não altera isto sozinho: siga a orientação mostrada.',
+  recommended: f.severity === 'high' && f.actionable && !f.weakSignal,
+})
 const sample: Sample[] = [
   { severity: 'high', scanner: 'minerador', name: 'editor-de-video.exe', location: 'PID 777 | RAM 2048 MB', target: 'C:\\Users\\Demo\\AppData\\Local\\Editor\\editor-de-video.exe --render', reason: 'Mais de um sinal de mineração ao mesmo tempo', action: 'Encerrar o processo 777 e mover o executável para a quarentena (se estiver numa pasta do usuário)', actionable: true, weakSignal: true },
   { severity: 'high', scanner: 'minerador', name: 'xmrig.exe', location: 'PID 4242 | RAM 310 MB', target: 'C:\\Users\\Demo\\AppData\\Local\\Temp\\xmrig.exe -o stratum+tcp://pool.example:3333', reason: 'Nome ou linha de comando típicos de minerador', action: 'Encerrar o processo 4242 e mover o executável para a quarentena (se estiver numa pasta do usuário)', actionable: true },
@@ -34,13 +40,13 @@ export function mockApi(): Api {
         await wait(350)
         onProgress({ kind: 'finished', label, count: label.startsWith('Persist') ? 5 : 1 })
       }
-      findings = sample.map((f, id) => ({ weakSignal: false, ...f, id }))
+      findings = sample.map((f, id) => ({ weakSignal: false, ...explainSample(f), ...f, id }))
       const notes = options.ioc ? ["1 linha(s) da lista de indicadores foram ignoradas (formato inválido)."] : []
       return { findings, notes }
     },
     async loadRecipe(text): Promise<ScanResult> {
       await wait(150)
-      findings = sample.slice(0, 2).map((f, id) => ({ weakSignal: false, ...f, id }))
+      findings = sample.slice(0, 2).map((f, id) => ({ weakSignal: false, ...explainSample(f), ...f, id }))
       return { findings, notes: text.includes("apagar") ? ["linha 1: tipo desconhecido: apagar"] : [] }
     },
     recentFiles: async (days) => [{ name: `novo-programa.exe (há ${days} h)`, path: "C:\\Users\\Demo\\AppData\\Local\\Temp\\novo-programa.exe" }],

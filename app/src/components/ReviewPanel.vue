@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Download } from '@lucide/vue'
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { ALL_SEVERITIES } from '../lib/filter'
@@ -12,6 +12,7 @@ const { t } = useI18n()
 const o = useOblivion()
 const { state } = o
 const exportMessage = ref('')
+const recommendedCount = computed(() => state.findings.filter((f) => f.recommended && f.actionable).length)
 
 function toggleSeverity(s: Severity): void {
   const next = new Set(state.filters.severities)
@@ -101,7 +102,17 @@ async function doExport(): Promise<void> {
             {{ t(`review.${s}`) }} ({{ o.severityCounts.value[s] }})
           </label>
         </fieldset>
-        <div class="ml-auto flex gap-2">
+        <div class="ml-auto flex flex-wrap gap-2">
+          <button
+            type="button"
+            data-testid="select-recommended"
+            class="min-h-11 rounded-lg bg-primary px-3 text-sm font-semibold text-primary-fg disabled:opacity-50"
+            :disabled="!recommendedCount"
+            :title="t('review.recommendedHint')"
+            @click="o.selectRecommended()"
+          >
+            {{ t('review.selectRecommended') }} ({{ recommendedCount }})
+          </button>
           <button type="button" class="min-h-11 rounded-lg border border-line px-3 text-sm hover:bg-bg" @click="o.selectVisible()">
             {{ t('review.selectVisible') }}
           </button>
@@ -126,8 +137,8 @@ async function doExport(): Promise<void> {
               <th scope="col" class="w-44 px-3 py-2">{{ t('review.colName') }}</th>
               <th scope="col" class="w-72 px-3 py-2">{{ t('review.colTarget') }}</th>
               <th scope="col" class="w-56 px-3 py-2">{{ t('review.colWhere') }}</th>
-              <th scope="col" class="w-60 px-3 py-2">{{ t('review.colReason') }}</th>
-              <th scope="col" class="w-64 px-3 py-2">{{ t('review.colAction') }}</th>
+              <th scope="col" class="w-60 px-3 py-2">{{ t('review.colWhat') }}</th>
+              <th scope="col" class="w-64 px-3 py-2">{{ t('review.colImpact') }}</th>
             </tr>
           </thead>
           <tbody>
@@ -153,11 +164,26 @@ async function doExport(): Promise<void> {
                 <span v-else class="text-muted" :title="t('review.manual')">–<span class="sr-only">{{ t('review.manual') }}</span></span>
               </td>
               <td class="px-3 py-2"><SeverityBadge :severity="f.severity" /></td>
-              <td class="px-3 py-2 font-medium break-words">{{ f.name }}</td>
+              <td class="px-3 py-2 font-medium break-words">
+                {{ f.name }}
+                <span v-if="f.recommended" class="mt-1 block text-xs font-semibold text-ok" data-testid="recommended-badge">{{ t('review.recommended') }}</span>
+              </td>
               <td class="px-3 py-2 font-mono text-xs break-all">{{ f.target }}</td>
               <td class="px-3 py-2 text-xs break-words text-muted">{{ f.location }} <span class="opacity-70">· {{ f.scanner }}</span></td>
-              <td class="px-3 py-2 break-words">{{ f.reason }}</td>
-              <td class="px-3 py-2 text-xs break-words text-muted">{{ f.action ?? '' }}</td>
+              <td class="px-3 py-2 break-words">
+                <p data-testid="what">{{ f.what }}</p>
+                <details class="mt-1 text-xs text-muted">
+                  <summary class="cursor-pointer">{{ t('review.technical') }}</summary>
+                  {{ f.reason }}
+                </details>
+              </td>
+              <td class="px-3 py-2 text-xs break-words">
+                <p data-testid="impact">{{ f.impact }}</p>
+                <details v-if="f.action" class="mt-1 text-muted">
+                  <summary class="cursor-pointer">{{ t('review.technical') }}</summary>
+                  {{ f.action }}
+                </details>
+              </td>
             </tr>
           </tbody>
         </table>

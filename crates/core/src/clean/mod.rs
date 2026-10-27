@@ -158,6 +158,9 @@ pub fn plan(f: &Finding) -> Option<Plan> {
         "conhecidos" => Plan::Manual(
             "Desinstale pelo Windows (Configurações > Aplicativos > Aplicativos instalados). Depois rode o scan de novo para ver se sobrou algo.",
         ),
+        "ransomware" => Plan::Manual(
+            "NÃO apague nada e desligue o computador da internet e da rede. Guarde o bilhete de resgate, não pague, e procure a família em nomoreransom.org. O Oblivion não decifra arquivos; restaure de um backup que não estava ligado ao PC.",
+        ),
         "atalhos" => Plan::Manual(
             "Abra as Propriedades do atalho e corrija o campo Destino (ou apague o atalho e recrie pelo programa original).",
         ),

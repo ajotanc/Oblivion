@@ -1,6 +1,7 @@
 pub mod allow;
 pub mod classify;
 pub mod clean;
+pub mod explain;
 pub mod finding;
 pub mod ioc;
 pub mod privilege;

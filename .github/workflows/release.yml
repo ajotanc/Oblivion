@@ -126,7 +126,7 @@ jobs:
           **Os arquivos não são assinados digitalmente**: o Windows pode mostrar um aviso do SmartScreen.
           Confira o SHA-256 de cada arquivo com `SHA256SUMS.txt` antes de executar.
 
-          - `*-setup.exe`: instalador do Windows (interface + CLI).
+          - `*-setup.exe`: instalador do Windows, **só da interface** (a linha de comando não vai dentro dele).
           - `oblivion-windows-x64.exe`: só a linha de comando, sem instalar.
           - `oblivion-linux-x64.tar.gz`: linha de comando do Linux (use com `sudo` para ter funcionalidade total).
           EOF

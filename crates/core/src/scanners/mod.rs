@@ -12,6 +12,7 @@ mod persistence_linux;
 #[cfg(windows)]
 pub(crate) mod persistence_win;
 mod processes;
+mod ransomware;
 mod rootkit;
 #[cfg(windows)]
 mod shortcuts_win;
@@ -136,6 +137,11 @@ pub fn scan_all_with(on_progress: &(dyn Fn(Progress) + Sync)) -> Vec<Finding> {
             Box::new(processes::scan),
         ),
         ("Rede (hosts, proxy, DNS)", "rede", Box::new(network::scan)),
+        (
+            "Sinais de ransomware",
+            "ransomware",
+            Box::new(ransomware::scan),
+        ),
         (
             "Programas indesejados conhecidos",
             "conhecidos",

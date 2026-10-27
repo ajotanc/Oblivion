@@ -11,7 +11,8 @@ use std::{
 use oblivion_core::{
     allow,
     clean::{self, Outcome, exec, undo},
-    finding::{Finding, MINER_STRONG_REASON, Severity},
+    explain,
+    finding::{Finding, Severity},
     ioc, privilege, recent, recipe, report, restore,
     scanners::{self, Progress, ScanOptions},
 };
@@ -51,10 +52,17 @@ struct FindingDto {
     actionable: bool,
     /// Processo marcado só por sinais fracos (CPU/GPU): a tela avisa para conferir antes de encerrar.
     weak_signal: bool,
+    /// O que é, em linguagem simples.
+    what: String,
+    /// O que acontece se o item for tratado.
+    impact: String,
+    /// Sinal forte e ação reversível: o botão "Selecionar recomendados" marca estes.
+    recommended: bool,
 }
 
 fn to_dto(id: usize, f: &Finding) -> FindingDto {
     let plan = clean::plan(f);
+    let x = explain::explain(f);
     FindingDto {
         id,
         severity: severity_name(f.severity),
@@ -64,13 +72,13 @@ fn to_dto(id: usize, f: &Finding) -> FindingDto {
         target: safe(&f.target),
         reason: safe(f.reason),
         actionable: plan.as_ref().is_some_and(|p| !p.is_manual()),
-        weak_signal: f.scanner == "minerador"
-            && f.severity > Severity::Info
-            && f.reason != MINER_STRONG_REASON,
+        weak_signal: explain::is_weak_miner_signal(f),
+        what: safe(&x.what),
+        impact: safe(&x.impact),
+        recommended: x.recommended,
         action: plan.map(|p| safe(&p.describe())),
     }
 }
-
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AppInfo {
@@ -537,7 +545,7 @@ mod tests {
         );
         weak.reason = "Mais de um sinal de mineração ao mesmo tempo";
         let mut strong = finding("xmrig.exe", "minerador", "PID 8 | RAM 1 MB", Severity::High);
-        strong.reason = MINER_STRONG_REASON;
+        strong.reason = oblivion_core::finding::MINER_STRONG_REASON;
         let task = finding("t", "tarefas", "Agendador de Tarefas", Severity::High);
         assert!(to_dto(0, &weak).weak_signal);
         assert!(!to_dto(1, &strong).weak_signal && !to_dto(2, &task).weak_signal);
@@ -937,6 +945,26 @@ mod tests {
         assert!(wmi_exists(), "o desfazer recriou a assinatura do WMI");
         let restored = std::fs::read(&hosts_path).unwrap();
         assert_eq!(restored, hosts, "o desfazer devolveu o hosts");
+    }
+
+    #[test]
+    fn every_dto_carries_a_plain_explanation_and_the_recommended_flag() {
+        let strong = Finding {
+            scanner: "minerador",
+            location: "PID 7 | RAM 1 MB".into(),
+            name: "xmrig.exe".into(),
+            target: "x".into(),
+            severity: Severity::High,
+            reason: oblivion_core::finding::MINER_STRONG_REASON,
+        };
+        let dto = to_dto(0, &strong);
+        assert!(dto.what.len() > 20 && !dto.impact.is_empty());
+        assert!(dto.recommended);
+        let info = Finding {
+            severity: Severity::Info,
+            ..strong
+        };
+        assert!(!to_dto(1, &info).recommended);
     }
 
     #[test]

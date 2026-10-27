@@ -53,9 +53,15 @@ Não há atualização automática: foi retirada a pedido e fica para uma fase f
 | Fluxos ocultos (ADS) | programas e scripts escondidos dentro de outros arquivos (NTFS) nas pastas onde malware se instala | orienta apagar o arquivo hospedeiro |
 | Disco de boot | MBR | só avisa: não grava no disco de boot |
 | Rootkits | processos que aparecem numa forma de listar e somem de outra; nomes ocultos no registro | avisa; **não detecta rootkits de kernel** |
+| Ransomware (rastros) | bilhetes de resgate e muitos arquivos com a mesma extensão incomum nas pastas do usuário | só avisa e orienta (desligar da rede, não pagar, nomoreransom.org); **não decifra nem recupera arquivos** |
 
 Tudo o que muda o sistema guarda o valor antigo na quarentena (e exporta o trecho do registro em `.reg`),
 pergunta antes e pode ser desfeito com `undo` ou pela tela **Histórico**.
+
+**Explicações simples e "recomendado".** Cada achado tem um texto "o que é" e "se você tratar" em linguagem comum,
+além do detalhe técnico. Itens de sinal forte e ação reversível ficam marcados como *recomendado*: na interface há o
+botão **Selecionar recomendados**, e na CLI `oblivion clean --recommended` trata só esses (ainda pergunta, a menos que
+use `--yes`). "Recomendado" não é prova de malware; processo marcado só por CPU/GPU alta nunca é recomendado.
 
 **CLI e interface fazem o mesmo.** Em **Opções avançadas** da tela de varredura estão a lista de indicadores
 (`--ioc`), os itens que você reconhece (`--allow`), a receita (`clean --recipe`) e os arquivos recentes (`recent`).
@@ -88,6 +94,7 @@ oblivion clean                               # remove, perguntando item a item (
 oblivion clean --only NOME --report r.html   # só os itens cujo nome/alvo contém NOME
 oblivion clean --yes                         # dispensa a pergunta só para itens ALTOS e entradas órfãs
 oblivion scan --ioc lista.txt --allow meus.txt   # com a sua lista de indicadores e de itens que você reconhece
+oblivion clean --recommended                  # só os itens recomendados (sinal forte e reversível)
 oblivion clean --recipe receita.txt          # em vez de varrer, trata só o que a receita pede (sempre confirma)
 oblivion recent --days 7                     # arquivos novos nas pastas onde malware se instala (só lista)
 oblivion undo PASTA_DA_QUARENTENA            # devolve o que a limpeza removeu
@@ -163,7 +170,7 @@ e `cargo audit`. O CI só tem permissão de leitura do código.
    e `app/src-tauri/tauri.conf.json`.
 2. Envie e crie a tag: `git tag v0.2.0 && git push origin v0.2.0`.
 3. O workflow `.github/workflows/release.yml` confere a tag contra as versões, roda os testes, gera o instalador
-   do Windows, o CLI do Windows e do Linux e o `SHA256SUMS.txt`, e cria um **rascunho** de release. Revise e publique
+   do Windows (**só da interface**; o CLI não vai dentro dele), o CLI do Windows e do Linux como arquivos separados e o `SHA256SUMS.txt`, e cria um **rascunho** de release. Revise e publique
    pela página de Releases do GitHub; nada fica público sozinho.
 
 Os arquivos saem **sem assinatura** por padrão (o Windows pode mostrar o aviso do SmartScreen). Se você cadastrar os
@@ -234,9 +241,10 @@ certutil -hashfile oblivion.exe SHA256   # compare com o hash publicado na relea
 - **Remoção no Windows**: não cobre extensões, drivers, exclusões do Defender, DNS, ADS, atalhos nem MBR (instrução
   manual). Serviços e WMI são tratados, mas essa parte **só foi testada em simulação e por testes automáticos**: o teste
   elevado `real_service_wmi_and_hosts` existe, porém ainda não foi rodado de verdade.
-- **Ransomware**: o Oblivion **não detecta nem decifra ransomware**. Só reconhece um comando que apaga cópias de
-  sombra e, se o programa estiver numa pasta suspeita ou persistir por Run/tarefa/serviço/WMI, pode removê-lo.
-  Arquivos já criptografados não são recuperados.
+- **Ransomware**: o Oblivion procura só **rastros** (bilhete de resgate, muitos arquivos com a mesma extensão incomum,
+  comando que apaga cópias de sombra). Não percebe a criptografia enquanto acontece, **não decifra nem recupera
+  arquivos**, e a lista de extensões é curta. Se o programa persistir por Run/tarefa/serviço/WMI ou estiver numa pasta
+  suspeita, ele pode ser removido; a cura dos arquivos depende de backup ou de ferramenta da própria família.
 - O scan roda os scanners **em paralelo** (cerca de 6 s; o do minerador sozinho mede a CPU por 4 s). Se um
   scanner quebrar por erro interno, o relatório mostra "Scanner ... falhou" em vez de omitir essa parte.
 - Minerador: sinais Sinais: nome/argumentos, CPU sustentada, GPU em

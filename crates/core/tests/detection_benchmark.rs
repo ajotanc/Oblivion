@@ -38,6 +38,8 @@ struct Bench {
     values: Vec<String>,
     children: Vec<Child>,
     public: Option<PathBuf>,
+    /// Pasta de teste criada dentro de Documentos (o scanner de ransomware olha as pastas do usuário).
+    docs: Option<PathBuf>,
 }
 
 impl Bench {
@@ -49,6 +51,7 @@ impl Bench {
             values: Vec::new(),
             children: Vec::new(),
             public: None,
+            docs: None,
         }
     }
 
@@ -90,6 +93,9 @@ impl Drop for Bench {
             }
         }
         let _ = fs::remove_dir_all(&self.dir);
+        if let Some(d) = &self.docs {
+            let _ = fs::remove_dir_all(d);
+        }
         if let Some(p) = &self.public {
             let _ = fs::remove_file(p);
         }
@@ -135,6 +141,16 @@ fn measure_detection_and_false_positives() {
     fs::copy(r"C:\Windows\System32\PING.EXE", &public).unwrap();
     b.public = Some(public.clone());
     let by_name = b.fake_exe(&format!("{MARK}-nome-conhecido.exe"));
+    // Ransomware simulado: um bilhete de resgate e muitos arquivos com a mesma extensão incomum, em Documentos.
+    let docs = PathBuf::from(std::env::var("USERPROFILE").unwrap())
+        .join("Documents")
+        .join(format!("{MARK}-ransom-{}", std::process::id()));
+    fs::create_dir_all(&docs).unwrap();
+    for i in 0..120 {
+        fs::write(docs.join(format!("arquivo{i}.locked")), b"x").unwrap();
+    }
+    fs::write(docs.join("HOW_TO_DECRYPT_FILES.txt"), b"teste").unwrap();
+    b.docs = Some(docs);
     // Programa escondido num fluxo alternativo de dados (começa com "MZ", como todo executável do Windows).
     let host = b.dir.join(format!("{MARK}-ads.txt"));
     fs::write(&host, "texto comum").unwrap();
@@ -241,6 +257,11 @@ fn measure_detection_and_false_positives() {
             "OblivionBench-ads.txt:oculto",
             "programa escondido em fluxo alternativo (ADS)",
         ),
+        (
+            "arquivos .locked",
+            "muitos arquivos .locked (ransomware simulado)",
+        ),
+        ("HOW_TO_DECRYPT_FILES.txt", "bilhete de resgate simulado"),
     ]
     .map(|(id, what)| Sample {
         id: id.to_string(),

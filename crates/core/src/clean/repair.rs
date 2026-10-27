@@ -281,6 +281,19 @@ pub fn fix_for(hive: &str, subkey: &str, name: &str) -> Option<RegFix> {
     })
 }
 
+/// O valor guardado no manifesto tem o tipo (e o tamanho) certo para o item? `vtype` é o número do registro
+/// (1 texto, 2 texto expansível, 3 binário, 4 DWORD, 7 lista de textos). Serviço: `Start` só vai de 0 a 4.
+pub fn restorable(fix: &RegFix, name: &str, vtype: u32, bytes: &[u8]) -> bool {
+    let dword = || -> Option<u32> { Some(u32::from_le_bytes(bytes.try_into().ok()?)) };
+    match &fix.fix {
+        Fix::Dword(_) => vtype == 4 && dword().is_some_and(|d| name != "Start" || d <= 4),
+        Fix::Multi(_) => vtype == 7,
+        Fix::Str(_) => matches!(vtype, 1 | 2),
+        // O padrão é o valor não existir: o que havia antes pode ser texto ou número.
+        Fix::Delete => matches!(vtype, 1 | 2 | 4 | 7),
+    }
+}
+
 /// O `undo` só restaura pares que o Oblivion poderia ter alterado.
 pub fn is_allowed(hive: &str, subkey: &str, name: &str) -> bool {
     fix_for(hive, subkey, name).is_some()
@@ -333,31 +346,31 @@ pub(crate) fn hosts_path() -> PathBuf {
 }
 
 /// Comenta as linhas do hosts cujo "IP nome" é o `entry`. `None` se nenhuma linha casar.
-pub fn comment_out(content: &str, entry: &str) -> Option<String> {
+/// Trabalha em BYTES: só as linhas que casam mudam; o resto do arquivo (fim de linha CRLF, acentos de outra
+/// codificação, BOM) fica exatamente como estava.
+pub fn comment_out(content: &[u8], entry: &str) -> Option<Vec<u8>> {
     let want: Vec<String> = entry.split_whitespace().map(str::to_lowercase).collect();
+    if want.len() < 2 {
+        return None;
+    }
     let mut changed = false;
-    let lines: Vec<String> = content
-        .lines()
-        .map(|line| {
-            let body = line.split('#').next().unwrap_or("");
-            let toks: Vec<String> = body.split_whitespace().map(str::to_lowercase).collect();
-            let hit = !line.trim_start().starts_with('#')
-                && toks.len() >= 2
-                && toks[0] == want[0]
-                && toks[1..]
-                    .iter()
-                    .any(|h| want.get(1).is_some_and(|w| w == h));
-            if hit {
-                changed = true;
-                format!("# [Oblivion] {line}")
-            } else {
-                line.to_string()
-            }
-        })
-        .collect();
-    changed.then(|| lines.join("\n") + "\n")
+    let mut out = Vec::with_capacity(content.len() + 32);
+    for raw in content.split_inclusive(|b| *b == b'\n') {
+        let line = String::from_utf8_lossy(raw);
+        let body = line.split('#').next().unwrap_or("");
+        let toks: Vec<String> = body.split_whitespace().map(str::to_lowercase).collect();
+        let hit = !line.trim_start().starts_with('#')
+            && toks.len() >= 2
+            && toks[0] == want[0]
+            && toks[1..].iter().any(|h| *h == want[1]);
+        if hit {
+            changed = true;
+            out.extend_from_slice(b"# [Oblivion] ");
+        }
+        out.extend_from_slice(raw);
+    }
+    changed.then_some(out)
 }
-
 /// Ordem do reparo do hosts: guarda o arquivo inteiro antes, reescreve, e confere.
 pub(super) fn repair_hosts(entry: &str, dir: &Path) -> super::Exec {
     use super::{Exec, Outcome};
@@ -375,7 +388,6 @@ pub(super) fn repair_hosts(entry: &str, dir: &Path) -> super::Exec {
             undo: Vec::new(),
         };
     };
-    let content = String::from_utf8_lossy(&bytes).into_owned();
     if entry.split_whitespace().count() < 2 {
         return Exec {
             outcome: Outcome::Skipped("entrada do hosts inválida".into()),
@@ -383,7 +395,7 @@ pub(super) fn repair_hosts(entry: &str, dir: &Path) -> super::Exec {
             undo: Vec::new(),
         };
     }
-    let Some(new) = comment_out(&content, entry) else {
+    let Some(new) = comment_out(&bytes, entry) else {
         return Exec {
             outcome: Outcome::Skipped("a linha já não está no hosts".into()),
             note: String::new(),
@@ -403,7 +415,7 @@ pub(super) fn repair_hosts(entry: &str, dir: &Path) -> super::Exec {
     if let Err(e) = std::fs::write(&backup, &bytes) {
         return fail(format!("não consegui guardar o hosts na quarentena: {e}"));
     }
-    if let Err(e) = std::fs::write(&path, new.as_bytes()) {
+    if let Err(e) = std::fs::write(&path, &new) {
         let _ = std::fs::remove_file(&backup);
         return fail(format!("não consegui gravar o hosts (administrador?): {e}"));
     }
@@ -414,7 +426,7 @@ pub(super) fn repair_hosts(entry: &str, dir: &Path) -> super::Exec {
             backup.display()
         ),
         undo: vec![
-            json!({"kind": "hosts", "from": backup, "to": path, "applied_sha256": sha256_hex(new.as_bytes())}),
+            json!({"kind": "hosts", "from": backup, "to": path, "applied_sha256": sha256_hex(&new)}),
         ],
     }
 }
@@ -468,7 +480,7 @@ mod win {
     use serde_json::json;
     use winreg::{RegKey, RegValue, enums::*, types::ToRegValue};
 
-    use super::{Fix, RegFix, is_allowed};
+    use super::{Fix, RegFix, fix_for, is_allowed, restorable};
     use crate::clean::{Exec, Outcome};
 
     fn root(hive: &str) -> Option<winreg::HKEY> {
@@ -641,6 +653,13 @@ mod win {
             let vtype = entry["vtype"].as_u64().ok_or("registro sem tipo")? as u32;
             let bytes = unhex(entry["data"].as_str().ok_or("registro sem dados")?)
                 .ok_or("dados inválidos")?;
+            // O manifesto não é confiável: o tipo e o tamanho têm de ser os que esse valor tem de verdade.
+            let fix = fix_for(hive, subkey, name).ok_or("valor fora da lista fixa")?;
+            if !restorable(&fix, name, vtype, &bytes) {
+                return Err(
+                    "o valor guardado não tem o tipo esperado para esse item: não restaurei".into(),
+                );
+            }
             let vtype = match vtype {
                 1 => REG_SZ,
                 2 => REG_EXPAND_SZ,
@@ -742,13 +761,27 @@ mod tests {
     #[test]
     fn hosts_lines_are_commented_not_deleted_and_only_the_matching_ones() {
         let hosts = "127.0.0.1 localhost\n1.2.3.4 banco.com www.banco.com # x\n5.6.7.8 outro.com\n";
-        let out = comment_out(hosts, "1.2.3.4 banco.com").unwrap();
+        let out =
+            String::from_utf8(comment_out(hosts.as_bytes(), "1.2.3.4 banco.com").unwrap()).unwrap();
         assert!(out.contains("127.0.0.1 localhost\n"));
         assert!(out.contains("# [Oblivion] 1.2.3.4 banco.com www.banco.com # x"));
         assert!(out.contains("\n5.6.7.8 outro.com\n"));
-        assert!(comment_out(hosts, "9.9.9.9 nada.com").is_none());
+        assert!(comment_out(hosts.as_bytes(), "9.9.9.9 nada.com").is_none());
         // Linha já comentada não conta.
-        assert!(comment_out("# 1.2.3.4 banco.com\n", "1.2.3.4 banco.com").is_none());
+        assert!(comment_out(b"# 1.2.3.4 banco.com\n", "1.2.3.4 banco.com").is_none());
+    }
+
+    #[test]
+    fn the_rest_of_the_hosts_is_kept_byte_for_byte() {
+        // CRLF, acento em outra codificação (0xE9 não é UTF-8 válido) e BOM nas outras linhas não podem mudar.
+        let mut original =
+            b"\xEF\xBB\xBF# coment\xE9rio\r\n127.0.0.1 localhost\r\n1.2.3.4 banco.com\r\n".to_vec();
+        let out = comment_out(&original, "1.2.3.4 banco.com").unwrap();
+        original.splice(
+            original.len() - b"1.2.3.4 banco.com\r\n".len()..,
+            b"# [Oblivion] 1.2.3.4 banco.com\r\n".iter().copied(),
+        );
+        assert_eq!(out, original);
     }
 
     #[test]
@@ -830,6 +863,35 @@ mod tests {
         restore_if_unchanged(&backup, &live, &ours).unwrap();
         assert_eq!(std::fs::read_to_string(&live).unwrap(), "original\n");
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_tampered_manifest_cannot_restore_a_wrong_type_or_an_impossible_service_start() {
+        let svc = fix_for(
+            "HKLM",
+            r"SYSTEM\CurrentControlSet\Services\Updater3",
+            "Start",
+        )
+        .unwrap();
+        assert!(restorable(&svc, "Start", 4, &2u32.to_le_bytes()));
+        assert!(
+            !restorable(&svc, "Start", 4, &9u32.to_le_bytes()),
+            "Start de serviço só vai até 4"
+        );
+        assert!(!restorable(&svc, "Start", 1, b"2\0"), "tipo errado");
+        assert!(!restorable(&svc, "Start", 4, &[1, 0]), "tamanho errado");
+        let boot = fix_for("HKLM", POLICIES_SYSTEM, "EnableLUA").unwrap();
+        assert!(restorable(&boot, "EnableLUA", 4, &0u32.to_le_bytes()));
+        let multi = fix_for(
+            "HKLM",
+            r"SYSTEM\CurrentControlSet\Control\Session Manager",
+            "BootExecute",
+        )
+        .unwrap();
+        assert!(
+            restorable(&multi, "BootExecute", 7, b"a\0\0\0")
+                && !restorable(&multi, "BootExecute", 4, &[0; 4])
+        );
     }
 
     #[test]

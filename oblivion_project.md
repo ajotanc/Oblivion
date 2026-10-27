@@ -41,13 +41,15 @@ descontinuado. Escrito em Rust, executável local, sem rede e sem telemetria.
 | Testes repetíveis da remoção (valor Run em HKCU temporário, atalho Startup, processo filho, undo) | pronto; rodam sem administrador |
 | Scan em paralelo; scanner que quebra vira aviso "falhou", nunca some | pronto, com testes; ~6 s (antes ~12 s) |
 | Mais persistência: Policies Run, Winlogon do usuário, IFEO, AppInit_DLLs, ServiceDll, drivers de terceiros, tarefas COM, contas com perfil carregado | pronto, com testes; verificado em scan real (IFEO plantado foi achado) |
-| Testes | 276 no núcleo (Windows), 188 no Linux e 27 no frontend; clippy `-D warnings` limpo; CI passou no GitHub |
+| Testes | 289 no núcleo (Windows), 202 no Linux e 28 no frontend; clippy `-D warnings` limpo; CI passou no GitHub (antes desta rodada) |
 | Remoção no Linux de cron, systemd e autostart | pendente (hoje: instrução manual) |
 | Serviço (desativar), WMI (remover), Winlogon e valores fixos (restaurar ao padrão), hosts (comentar linha) | pronto com desfazer; **só testado em simulação e por testes automáticos**: falta rodar o teste elevado `real_service_wmi_and_hosts` |
 | Extensão de navegador, driver, exclusões do Defender, DNS e MBR | por decisão, manual |
 | Novos scanners: processos, rede, defesas, padrões do Windows, programas conhecidos, atalhos, ADS, visão cruzada de rootkit | pronto, com testes; sem falso positivo no scan desta máquina |
 | Medição de detecção (`--features bench`): 20 casos, 100%, 0 falso positivo nos controles | mede só casos que o projeto já conhece |
-| Ransomware | **não detecta nem decifra**; só remove persistência e executável em pasta suspeita |
+| Ransomware | só **rastros** (bilhete de resgate, extensão incomum em massa); não decifra nem vê a criptografia acontecendo; benchmark simula e acha |
+| Explicações simples, "recomendado", `clean --recommended` e botão da interface | pronto, com testes |
+| Revisão de segurança do código novo (feita pelo próprio autor, **não independente**) | hosts em bytes, `undo` só desfaz se o valor não mudou e com tipo conferido; falta revisão por outra pessoa/ferramenta |
 | Interface gráfica (Tauri 2 + Vue 3): console ao vivo, filtros, confirmação, histórico/desfazer, tema claro/escuro, pt-BR e en, versão sempre visível | pronta (v0.1); janela real abre e fecha limpa; 18 testes de frontend; a remoção pela tela só foi verificada pela lógica (o backend usa o mesmo núcleo do CLI) e no navegador com dados simulados |
 | Teste REAL da remoção pelo backend da interface (valor Run + processo; simulação, remoção, quarentena em ProgramData, listagem, desfazer, limpeza) | passou elevado (UAC); nada sobrou no sistema |
 | Contraste (WCAG AA, 2 temas) e acessibilidade (axe: 4 telas, 2 idiomas, diálogo) automatizados | prontos; o contraste achou um botão vermelho sem token de texto no tema escuro (corrigido) |
@@ -124,8 +126,7 @@ oblivion undo PASTA_DA_QUARENTENA
 ## 🗺️ Próximos passos
 
 1. Rodar o teste elevado (`cargo test -p oblivion-app --lib -- --ignored real_service_wmi_and_hosts`, terminal de administrador).
-2. Sinais de ransomware (nomes de bilhetes de resgate, extensões em massa, cópias de sombra apagadas) e, se
-   possível, aviso antes de criptografar (arquivos-isca). Decifrar arquivos está fora de alcance.
+2. Ransomware: arquivos-isca para avisar durante a criptografia (hoje só há rastros depois). Decifrar fica fora de alcance.
 3. Ampliar a base de conhecimento (`known.txt`, `hashes.txt` via `tools/refresh-iocs.ps1`).
 4. Medir de verdade em uma VM isolada (kit em `tools/sandbox/`, nunca testado) e ampliar o benchmark.
 5. Remoção de cron, systemd e autostart no Linux, com o mesmo contrato (quarentena, undo, relatório).

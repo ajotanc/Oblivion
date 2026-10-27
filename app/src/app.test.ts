@@ -130,6 +130,25 @@ describe('Oblivion UI', () => {
     expect(w.find('[data-testid=result]').exists()).toBe(false)
     w.unmount()
   })
+  it('explains each finding in plain words and selects only the recommended ones with one click', async () => {
+    const w = mountApp()
+    await scan(w)
+    await w.get('[data-testid=step-review]').trigger('click')
+    expect(w.findAll('[data-testid=what]').length).toBe(9)
+    expect(w.findAll('[data-testid=impact]').length).toBe(9)
+    expect(w.text()).toContain('Se você tratar')
+    const { state } = useOblivion()
+    const expected = state.findings.filter((f) => f.recommended && f.actionable).length
+    expect(expected).toBeGreaterThan(0)
+    await w.get('[data-testid=select-recommended]').trigger('click')
+    expect(state.selected.size).toBe(expected)
+    // Item de sinal fraco (processo que pode ser um editor de vídeo) nunca vem marcado.
+    const weak = state.findings.find((f) => f.weakSignal)!
+    expect(state.selected.has(weak.id)).toBe(false)
+    expect(w.findAll('[data-testid=recommended-badge]').length).toBe(expected)
+    w.unmount()
+  })
+
   it('offers the same extras as the command line: indicators, allow list, recipe and recent files', async () => {
     const w = mountApp()
     await flush(20)
