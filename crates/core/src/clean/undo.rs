@@ -52,6 +52,13 @@ fn describe(entry: &Value) -> String {
             entry["hive"].as_str().unwrap_or("?"),
             entry["subkey"].as_str().unwrap_or("?")
         ),
+        Some("reg_value") => format!(
+            "Devolver o valor \"{}\" de {}\\{} ao que era antes",
+            entry["name"].as_str().unwrap_or("?"),
+            entry["hive"].as_str().unwrap_or("?"),
+            entry["subkey"].as_str().unwrap_or("?")
+        ),
+        Some("hosts") => "Devolver o arquivo hosts ao que era antes".to_string(),
         Some("task") => format!(
             "Recriar a tarefa \"{}\"",
             entry["name"].as_str().unwrap_or("?")
@@ -67,6 +74,9 @@ fn restore_entry(dir: &Path, entry: &Value) -> Result<(), String> {
         Some("run_value") => super::exec::restore_run_value(entry),
         #[cfg(windows)]
         Some("task") => super::exec::restore_task(dir, entry),
+        #[cfg(windows)]
+        Some("reg_value") => super::repair::restore_reg_value(entry),
+        Some("hosts") => super::repair::restore_hosts(dir, entry),
         _ => {
             let _ = dir;
             Err("tipo de item não suportado neste sistema".into())

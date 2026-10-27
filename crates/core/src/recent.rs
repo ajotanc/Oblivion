@@ -1,4 +1,4 @@
-//! Diagnóstico de arquivos recentes (no espírito do Find3M do ComboFix): lista os executáveis e scripts
+//! Diagnóstico de arquivos recentes (linha do tempo para quem analisa): lista os executáveis e scripts
 //! criados ou alterados há pouco nas pastas onde malware costuma se instalar. É só uma linha do tempo
 //! para quem analisa: nada aqui é veredito, então tudo sai como INFO e nada é removido.
 use std::{

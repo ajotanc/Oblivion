@@ -1,5 +1,5 @@
 import type { Api } from './index'
-import type { CleanResult, Finding } from '../types'
+import type { CleanResult, Finding, ScanResult } from '../types'
 
 /** Dados simulados, usados só quando a tela abre fora do app (pré-visualização no navegador e testes). */
 type Sample = Omit<Finding, 'id' | 'weakSignal'> & { weakSignal?: boolean }
@@ -28,15 +28,22 @@ export function mockApi(): Api {
       platform: 'windows',
       alert: 'ATENÇÃO: o Oblivion está rodando SEM privilégios de administrador, então o resultado ficará incompleto.',
     }),
-    async runScan(onProgress) {
+    async runScan(onProgress, options = {}): Promise<ScanResult> {
       for (const label of labels) onProgress({ kind: 'started', label, count: 0 })
       for (const label of labels) {
         await wait(350)
         onProgress({ kind: 'finished', label, count: label.startsWith('Persist') ? 5 : 1 })
       }
       findings = sample.map((f, id) => ({ weakSignal: false, ...f, id }))
-      return findings
+      const notes = options.ioc ? ["1 linha(s) da lista de indicadores foram ignoradas (formato inválido)."] : []
+      return { findings, notes }
     },
+    async loadRecipe(text): Promise<ScanResult> {
+      await wait(150)
+      findings = sample.slice(0, 2).map((f, id) => ({ weakSignal: false, ...f, id }))
+      return { findings, notes: text.includes("apagar") ? ["linha 1: tipo desconhecido: apagar"] : [] }
+    },
+    recentFiles: async (days) => [{ name: `novo-programa.exe (há ${days} h)`, path: "C:\\Users\\Demo\\AppData\\Local\\Temp\\novo-programa.exe" }],
     async runClean(ids, dryRun): Promise<CleanResult> {
       await wait(500)
       const chosen = findings.filter((f) => ids.includes(f.id) && f.actionable)

@@ -139,7 +139,7 @@ fn com_class_ids(xml: &str) -> Vec<String> {
 }
 
 /// A DLL (ou programa) que implementa a classe COM, lida do registro.
-fn resolve_clsid(id: &str) -> Option<String> {
+pub(crate) fn resolve_clsid(id: &str) -> Option<String> {
     let class = RegKey::predef(HKEY_LOCAL_MACHINE)
         .open_subkey(format!(r"SOFTWARE\Classes\CLSID\{id}"))
         .ok()?;

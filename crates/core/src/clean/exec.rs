@@ -41,6 +41,9 @@ pub fn execute(plan: &Plan, f: &Finding, dir: &Path) -> Exec {
         Plan::Task { name, .. } => with_target_file(win::task(name, f, dir), f, dir),
         #[cfg(windows)]
         Plan::Startup { path } => win::startup(path, dir),
+        #[cfg(windows)]
+        Plan::Repair(fix) => super::repair::repair_value(fix, dir),
+        Plan::Hosts { entry } => super::repair::repair_hosts(entry, dir),
         _ => skipped("ação não disponível neste sistema"),
     }
 }

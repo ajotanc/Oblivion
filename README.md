@@ -1,6 +1,6 @@
 # Oblivion
 
-Sucessor moderno do ComboFix, escrito em Rust, para Windows e Linux. Dois modos separados:
+Utilitário de diagnóstico e limpeza de segurança, escrito em Rust, para Windows e Linux. Dois modos separados:
 
 - **`scan`**: só leitura. Identifica o que existe e gera um relatório. Nada é alterado.
 - **`clean`**: opt-in. Procura, **remove com a sua confirmação** e gera o relatório do que foi feito.
@@ -10,7 +10,7 @@ Os achados são indícios, não veredito. Nenhuma ferramenta detecta "qualquer m
 
 ## Interface gráfica
 
-O Oblivion tem uma interface no estilo do ComboFix (um console com o log da varredura ao vivo), modernizada:
+O Oblivion tem uma interface com um console que mostra o log da varredura ao vivo:
 tema claro/escuro, português e inglês, filtros, confirmação antes de remover e histórico de quarentenas com
 desfazer. A **versão aparece sempre** no cabeçalho e no rodapé (e `oblivion --version` no terminal).
 Passos: **1. Escanear** (só leitura) → **2. Revisar** (filtros e seleção) → **3. Limpar** (simulação ou remoção
@@ -38,6 +38,39 @@ A interface é Tauri 2 + Vue 3 + TypeScript + Tailwind, chama o mesmo núcleo Ru
 e manda ao backend só **números** de achados (o backend guarda os achados e resolve caminhos e comandos).
 Não há atualização automática: foi retirada a pedido e fica para uma fase futura.
 
+## O que ele verifica
+
+| Área | O que olha | Se achar |
+|---|---|---|
+| Inicialização | chaves Run, pasta Startup, Winlogon, IFEO, AppInit, serviços, drivers, tarefas agendadas, WMI | remove (Run, Startup, tarefa) ou restaura o padrão (Winlogon) |
+| Processos | processos disfarçados de programas do Windows, assinatura digital, mineradores (CPU, GPU, rede) | encerra e move o executável |
+| Padrões do Windows | BootExecute, shell do modo seguro, pacotes do LSA, extensões do Explorer (BHO), win.ini e system.ini | restaura o padrão onde há um seguro |
+| Defesas | Defender, UAC, firewall, Gerenciador de Tarefas, Editor de Registro, atualizações | restaura o padrão |
+| Rede | arquivo hosts, proxy, DNS fixo | comenta a linha do hosts, desliga o proxy; DNS é manual |
+| Programas conhecidos | falsos antivírus e adware de uma lista curta e curada | orienta a desinstalar |
+| Navegadores | extensões do Chromium e do Firefox | orienta remover |
+| Disco de boot | MBR | só avisa: não grava no disco de boot |
+| Rootkits | processos que aparecem numa forma de listar e somem de outra; nomes ocultos no registro | avisa; **não detecta rootkits de kernel** |
+
+Tudo o que muda o sistema guarda o valor antigo na quarentena (e exporta o trecho do registro em `.reg`),
+pergunta antes e pode ser desfeito com `undo` ou pela tela **Histórico**.
+
+**CLI e interface fazem o mesmo.** Em **Opções avançadas** da tela de varredura estão a lista de indicadores
+(`--ioc`), os itens que você reconhece (`--allow`), a receita (`clean --recipe`) e os arquivos recentes (`recent`).
+O motor é o mesmo código do núcleo, então o resultado é igual nos dois.
+
+Formato da receita (uma linha por item; `#` comenta; nunca aceita caminho livre nem processos do Windows):
+
+```text
+valor: HKCU\Software\Microsoft\Windows\CurrentVersion\Run | NomeDoValor
+inicializacao: atalho-suspeito.lnk
+processo: programa.exe
+```
+
+A base de indicadores embutida é **pequena e curada à mão** (`crates/core/data/`); o Oblivion não promete
+reconhecer todo malware. `tools/refresh-iocs.ps1` atualiza a lista de hashes a partir do MalwareBazaar (abuse.ch,
+CC0) usando a **sua** chave, lida da variável de ambiente `ABUSECH_AUTH_KEY` (nunca guarde a chave no repositório).
+
 ## Uso (linha de comando)
 
 ```bash
@@ -46,6 +79,9 @@ oblivion clean --dry-run                     # mostra o que seria removido, sem 
 oblivion clean                               # remove, perguntando item a item (administrador/root)
 oblivion clean --only NOME --report r.html   # só os itens cujo nome/alvo contém NOME
 oblivion clean --yes                         # dispensa a pergunta só para itens ALTOS e entradas órfãs
+oblivion scan --ioc lista.txt --allow meus.txt   # com a sua lista de indicadores e de itens que você reconhece
+oblivion clean --recipe receita.txt          # em vez de varrer, trata só o que a receita pede (sempre confirma)
+oblivion recent --days 7                     # arquivos novos nas pastas onde malware se instala (só lista)
 oblivion undo PASTA_DA_QUARENTENA            # devolve o que a limpeza removeu
 oblivion restore-point                       # cria um ponto de restauração (Windows, administrador)
 oblivion --help                              # mostra o uso
@@ -93,33 +129,13 @@ comando inteira do achado (copie o "alvo" do relatório), sem diferenciar maiús
 prefixo. Itens SUSPEITOS que casam passam a INFO; ALTOS nunca são escondidos. Casar por "contém" foi
 descartado de propósito: um malware poderia escapar só citando o seu padrão como argumento.
 
-## Paridade com o ComboFix
-
-| ComboFix | Oblivion | Estado |
-|---|---|---|
-| Ponto de restauração antes de mexer | `restore-point` | pronto |
-| Entradas de inicialização (Run, Winlogon, IFEO, AppInit, serviços, drivers) | scanner de persistência + remoção com quarentena | pronto |
-| Tarefas agendadas e WMI | scanners de tarefas e WMI + remoção | pronto |
-| Processos disfarçados / Kill-All | scanner de processos (nome de sistema em pasta errada, assinatura digital) | pronto |
-| Arquivo hosts, proxy, DNS | scanner de rede (manual) | pronto |
-| Defender, UAC, firewall, políticas bloqueadas | scanner de defesas do Windows (manual) | pronto |
-| Setor de boot (MBR) | leitura e verificação | pronto (sem reparo) |
-| Navegadores | extensões do Chromium e do Firefox | pronto |
-| Minerador (extra, não existia no ComboFix) | CPU, memória, GPU e rede | pronto |
-| Listas de assinaturas (rogues, srizbi, CLSID) | `--ioc ARQUIVO`: sua lista de hashes SHA-256 e nomes (o Oblivion não traz lista pronta) | pronto |
-| Relatório de arquivos recentes (Find3M) | `oblivion recent [--days N]` | pronto |
-| Script de correção (CFScript) | `clean --recipe ARQUIVO`: linhas `valor:`, `inicializacao:`, `processo:`; sempre confirma item a item, sem caminho livre | pronto |
-| Reparo de MBR e Winsock | orientação passo a passo no relatório; o Oblivion não grava no disco de boot | pronto (manual) |
-| Rootkits | visão cruzada de processos (API x WMI no Windows; /proc x teste por PID no Linux) e valores Run com nome oculto; **não detecta rootkits de kernel** | pronto (limitado) |
-
-Nada disso vem do código do ComboFix: foi tudo reescrito a partir do que ele fazia.
 ## Licença
 
 Oblivion é software livre, sob a **GNU General Public License v3.0 (somente)**; veja o arquivo [LICENSE](LICENSE).
 Em resumo: você pode usar, estudar, modificar e redistribuir; quem distribuir uma versão modificada deve
 mantê-la sob a mesma licença e fornecer o código-fonte. O programa vem **sem garantia** (texto da licença,
 seções 15 e 16): uma ferramenta que remove itens do sistema deve ser usada com cuidado e com backup.
-O código é original; o ComboFix serviu só para estudar como ele funcionava, e nenhum código ou dado dele é distribuído aqui.
+O código é original, escrito para este projeto.
 
 ## Verificações automáticas (CI)
 
@@ -140,8 +156,6 @@ crates/
 app/
   src/          interface Vue (componentes, composables, i18n, API real e simulada)
   src-tauri/    backend Tauri (comandos que usam o núcleo)
-docs/ESTUDO.md              # mapa ComboFix -> Oblivion
-_research/                  # binário e arquivos extraídos do ComboFix (NÃO executar)
 ```
 
 ## Convenções (de `D:\Apps\utility_project_guidelines.md`)

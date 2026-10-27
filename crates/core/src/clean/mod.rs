@@ -7,6 +7,7 @@
 //!   e o executável dele). O resto (serviços, Winlogon, WMI, extensões, MBR) vira instrução manual.
 //! - Com a confirmação do usuário, item a item. `--yes` cobre apenas ALTO e entradas órfãs.
 pub mod exec;
+pub mod repair;
 pub mod secure;
 pub mod undo;
 
@@ -42,6 +43,12 @@ pub enum Plan {
     Process {
         pid: u32,
     },
+    /// Devolve um valor do sistema ao padrão (lista fixa em `repair`).
+    Repair(repair::RegFix),
+    /// Comenta uma linha do arquivo hosts (o original fica na quarentena).
+    Hosts {
+        entry: String,
+    },
     /// Não removemos sozinhos; o texto diz o que o usuário deve fazer.
     Manual(&'static str),
 }
@@ -69,6 +76,10 @@ impl Plan {
             Plan::Startup { path } => format!("Mover \"{}\" para a quarentena", path.display()),
             Plan::Process { pid } => format!(
                 "Encerrar o processo {pid} e mover o executável para a quarentena (se estiver numa pasta do usuário)"
+            ),
+            Plan::Repair(fix) => fix.describe(),
+            Plan::Hosts { entry } => format!(
+                "Comentar a linha \"{entry}\" do arquivo hosts (o arquivo original fica guardado na quarentena)"
             ),
             Plan::Manual(text) => (*text).to_string(),
         }
@@ -121,6 +132,9 @@ pub fn plan(f: &Finding) -> Option<Plan> {
     if f.severity == Severity::Info {
         return None;
     }
+    if let Some(repair) = repair::plan_for(f) {
+        return Some(repair);
+    }
     Some(match f.scanner {
         "minerador" | "processos" => pid_from_location(&f.location)
             .map_or(Plan::Manual("Encerre o processo manualmente."), |pid| {
@@ -131,6 +145,12 @@ pub fn plan(f: &Finding) -> Option<Plan> {
             file: exec::target_file(&f.target),
         },
         "persistencia" => persistence_plan(f),
+        "conhecidos" => Plan::Manual(
+            "Desinstale pelo Windows (Configurações > Aplicativos > Aplicativos instalados). Depois rode o scan de novo para ver se sobrou algo.",
+        ),
+        "baseline" => Plan::Manual(
+            "Compare com o padrão do Windows e restaure pelo Editor de Registro; se um programa seu (ex.: leitor biométrico) instalou isso, ignore.",
+        ),
         "rootkit" => Plan::Manual(
             "Reinicie e rode o scan de novo; se o PID continuar sumindo de uma das listas, analise a partir de um sistema limpo (disco de recuperação). O Oblivion não consegue ver rootkits de kernel.",
         ),
@@ -243,6 +263,8 @@ pub fn actionable_count(findings: &[Finding], only: &[String]) -> usize {
 fn is_safe_to_auto_confirm(f: &Finding, plan: &Plan) -> bool {
     match plan {
         Plan::Process { .. } => f.reason == MINER_STRONG_REASON,
+        // Mudar configuração do sistema sempre pergunta, mesmo com --yes.
+        Plan::Repair(_) | Plan::Hosts { .. } => false,
         _ => f.severity == Severity::High || f.reason == ORPHAN_REASON,
     }
 }
@@ -500,9 +522,17 @@ mod tests {
             Severity::Suspicious,
         );
         assert!(matches!(plan(&startup), Some(Plan::Startup { .. })));
-        // Winlogon e serviços NUNCA são removidos automaticamente (quebrariam o login).
-        for location in [
+        // Winlogon nunca é APAGADO (quebraria o login): no máximo volta ao valor padrão, com desfazer.
+        let winlogon = finding(
+            "persistencia",
             r"HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon",
+            "Shell",
+            "evil.exe",
+            Severity::High,
+        );
+        assert!(matches!(plan(&winlogon), Some(Plan::Repair(_))));
+        // Serviços e chaves fora da lista seguem só como instrução manual.
+        for location in [
             r"HKLM\SYSTEM\CurrentControlSet\Services",
             r"HKCU\SOFTWARE\Qualquer\Outra\Chave",
         ] {

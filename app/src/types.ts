@@ -17,6 +17,17 @@ export interface Finding {
   weakSignal: boolean
 }
 
+/** Resultado de uma varredura ou de uma receita: os itens e os avisos para mostrar ao usuário. */
+export interface ScanResult {
+  findings: Finding[]
+  notes: string[]
+}
+
+export interface RecentItem {
+  name: string
+  path: string
+}
+
 export interface AppInfo {
   version: string
   elevated: boolean

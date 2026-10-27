@@ -2,7 +2,7 @@ import { computed, reactive } from 'vue'
 
 import { createApi } from '../api'
 import { actionableIds, applyFilters, countBySeverity, newFilters, scannerOptions } from '../lib/filter'
-import type { AppInfo, CleanResult, Finding, Quarantine, ScanProgress, Step, UndoItem } from '../types'
+import type { AppInfo, CleanResult, Finding, Quarantine, RecentItem, ScanProgress, Step, UndoItem } from '../types'
 
 export interface LogLine {
   time: string
@@ -32,6 +32,17 @@ const state = reactive({
   historyError: '',
   undoResults: [] as UndoItem[],
   reportPath: '',
+  /** Opções avançadas: o mesmo que `--ioc` e `--allow` na linha de comando. */
+  options: { ioc: '', allow: '' },
+  /** Avisos da última varredura ou receita (linhas ignoradas etc.). */
+  notes: [] as string[],
+  recipeBusy: false,
+  recipeError: '',
+  recent: [] as RecentItem[],
+  recentDays: 7,
+  recentBusy: false,
+  recentDone: false,
+  recentError: '',
 })
 
 const message = (e: unknown): string => (e instanceof Error ? e.message : String(e))
@@ -71,7 +82,10 @@ async function startScan(startedText: string, finishedText: (total: number, high
   state.cleanResult = null
   log(startedText)
   try {
-    state.findings = await api.runScan(onProgress)
+    const result = await api.runScan(onProgress, { ioc: state.options.ioc, allow: state.options.allow })
+    state.findings = result.findings
+    state.notes = result.notes
+    result.notes.forEach((n) => log(n, 'warn'))
     state.scanned = true
     const c = countBySeverity(state.findings)
     log(finishedText(state.findings.length, c.high, c.suspicious), 'ok')
@@ -80,6 +94,42 @@ async function startScan(startedText: string, finishedText: (total: number, high
     log(state.scanError, 'error')
   } finally {
     state.scanning = false
+  }
+}
+
+/** Receita: não varre; trata só o que o texto pede, pelo mesmo caminho de revisão e limpeza. */
+async function applyRecipe(text: string): Promise<boolean> {
+  if (state.recipeBusy || !text.trim()) return false
+  state.recipeBusy = true
+  state.recipeError = ''
+  try {
+    const result = await api.loadRecipe(text)
+    state.findings = result.findings
+    state.notes = result.notes
+    state.selected = new Set()
+    state.cleanResult = null
+    state.scanned = true
+    state.step = 'review'
+    return true
+  } catch (e) {
+    state.recipeError = message(e)
+    return false
+  } finally {
+    state.recipeBusy = false
+  }
+}
+
+async function loadRecent(): Promise<void> {
+  if (state.recentBusy) return
+  state.recentBusy = true
+  state.recentError = ''
+  try {
+    state.recent = await api.recentFiles(state.recentDays)
+    state.recentDone = true
+  } catch (e) {
+    state.recentError = message(e)
+  } finally {
+    state.recentBusy = false
   }
 }
 
@@ -150,6 +200,8 @@ export function useOblivion() {
     selectedFindings,
     init,
     startScan,
+    applyRecipe,
+    loadRecent,
     toggleSelect,
     selectVisible,
     clearSelection,

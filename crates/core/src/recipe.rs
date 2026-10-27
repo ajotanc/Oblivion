@@ -1,4 +1,4 @@
-//! Receitas declarativas (no espírito do CFScript do ComboFix, com salvaguardas): um arquivo seu diz o
+//! Receitas declarativas (com salvaguardas): um arquivo seu diz o
 //! QUE remover, e o Oblivion transforma cada linha em um item do fluxo normal de limpeza. Por isso
 //! valem as mesmas regras: confirmação item a item (`--yes` não vale para receitas), ponto de
 //! restauração, quarentena e `undo`. A receita nunca roda comandos nem apaga caminho livre.

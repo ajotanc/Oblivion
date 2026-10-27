@@ -1,0 +1,51 @@
+# Programas conhecidos como indesejados, comparados com a lista de programas instalados (Windows).
+# Formato: tipo:nome  (nome em minúsculas; vale se o nome do programa COMEÇA com ele; com = na frente, só se for IGUAL)
+#   rogue = falso antivírus (scareware): finge achar vírus para vender a "cura". Tratado como ALTO.
+#   pup   = programa potencialmente indesejado (adware, sequestrador de navegador). Tratado como SUSPEITO.
+# É uma lista curta e curada à mão, NÃO uma base completa de malware. Complemente com --ioc.
+
+rogue:xp antivirus
+rogue:vista antivirus
+rogue:=windows antivirus
+rogue:winantivirus
+rogue:antivirus 20
+rogue:=security tool
+rogue:=system security
+rogue:=personal antivirus
+rogue:=personal security
+rogue:winfixer
+rogue:drivecleaner
+rogue:errorprotector
+rogue:privacyprotector
+rogue:malware defender
+rogue:internet security 20
+rogue:windows police pro
+rogue:windows protection suite
+rogue:security essentials 20
+rogue:spyware protect 20
+rogue:ultimate defender
+rogue:=virus doctor
+rogue:braviax
+
+pup:conduit
+pup:search protect
+pup:searchprotect
+pup:babylon toolbar
+pup:babylon
+pup:ask toolbar
+pup:delta toolbar
+pup:delta search
+pup:mindspark
+pup:mywebsearch
+pup:yontoo
+pup:superfish
+pup:wajam
+pup:opencandy
+pup:installcore
+pup:crossrider
+pup:somoto
+pup:softpulse
+pup:webssearches
+pup:sweetim
+pup:sweet-page
+pup:snap.do

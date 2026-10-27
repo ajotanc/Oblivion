@@ -9,10 +9,11 @@ use std::{
 };
 
 use oblivion_core::{
+    allow,
     clean::{self, Outcome, exec, undo},
     finding::{Finding, MINER_STRONG_REASON, Severity},
-    privilege, report, restore,
-    scanners::{self, Progress},
+    ioc, privilege, recent, recipe, report, restore,
+    scanners::{self, Progress, ScanOptions},
 };
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
@@ -118,16 +119,19 @@ impl From<Progress<'_>> for ProgressDto {
     }
 }
 
-#[tauri::command]
-async fn run_scan(app: AppHandle, state: State<'_, AppState>) -> Result<Vec<FindingDto>, String> {
-    let handle = app.clone();
-    let mut findings = tauri::async_runtime::spawn_blocking(move || {
-        scanners::scan_all_with(&|p| {
-            let _ = handle.emit("scan-progress", ProgressDto::from(p));
-        })
-    })
-    .await
-    .map_err(|e| e.to_string())?;
+/// O que a tela recebe de uma varredura (ou de uma receita): os itens e os avisos para mostrar ao usuário.
+#[derive(Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
+struct ScanDto {
+    findings: Vec<FindingDto>,
+    notes: Vec<String>,
+}
+
+fn store(
+    state: &State<'_, AppState>,
+    mut findings: Vec<Finding>,
+    notes: Vec<String>,
+) -> Result<ScanDto, String> {
     findings.sort_by_key(|f| std::cmp::Reverse(f.severity));
     let dtos = findings
         .iter()
@@ -138,9 +142,80 @@ async fn run_scan(app: AppHandle, state: State<'_, AppState>) -> Result<Vec<Find
         .findings
         .lock()
         .map_err(|_| "estado interno bloqueado")? = findings;
-    Ok(dtos)
+    Ok(ScanDto {
+        findings: dtos,
+        notes: notes.iter().map(|n| safe(n)).collect(),
+    })
 }
 
+/// Lê o texto colado/aberto na tela como as listas `--ioc` e `--allow` da CLI. Linha ruim vira aviso.
+fn read_options(ioc_text: Option<&str>, allow_text: Option<&str>) -> (ScanOptions, Vec<String>) {
+    let mut notes = Vec::new();
+    let iocs = ioc_text
+        .map(|t| {
+            let (iocs, ignored) = ioc::Iocs::parse(t);
+            if ignored > 0 {
+                notes.push(format!(
+                    "{ignored} linha(s) da lista de indicadores foram ignoradas (formato inválido)."
+                ));
+            }
+            iocs
+        })
+        .unwrap_or_default();
+    let allow = allow_text.map(allow::parse).unwrap_or_default();
+    (ScanOptions { iocs, allow }, notes)
+}
+
+#[tauri::command]
+async fn run_scan(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    ioc: Option<String>,
+    allow: Option<String>,
+) -> Result<ScanDto, String> {
+    let (opts, notes) = read_options(ioc.as_deref(), allow.as_deref());
+    let handle = app.clone();
+    let findings = tauri::async_runtime::spawn_blocking(move || {
+        scanners::scan_with(&opts, &|p| {
+            let _ = handle.emit("scan-progress", ProgressDto::from(p));
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    store(&state, findings, notes)
+}
+
+/// Receita: em vez de varrer, trata só o que o texto pede. Segue o mesmo caminho de revisão e limpeza.
+#[tauri::command]
+async fn load_recipe(state: State<'_, AppState>, text: String) -> Result<ScanDto, String> {
+    let (findings, problems) = tauri::async_runtime::spawn_blocking(move || recipe::load(&text))
+        .await
+        .map_err(|e| e.to_string())?;
+    store(&state, findings, problems)
+}
+
+#[derive(Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
+struct RecentDto {
+    name: String,
+    path: String,
+}
+
+/// Arquivos novos nas pastas onde malware costuma se instalar (só diagnóstico).
+#[tauri::command]
+async fn recent_files(days: u32) -> Result<Vec<RecentDto>, String> {
+    let found =
+        tauri::async_runtime::spawn_blocking(move || recent::scan(u64::from(days.clamp(1, 365))))
+            .await
+            .map_err(|e| e.to_string())?;
+    Ok(found
+        .iter()
+        .map(|f| RecentDto {
+            name: safe(&f.name),
+            path: safe(&f.target),
+        })
+        .collect())
+}
 #[derive(Serialize, Debug)]
 #[serde(rename_all = "camelCase")]
 struct RecordDto {
@@ -411,6 +486,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             app_info,
             run_scan,
+            load_recipe,
+            recent_files,
             run_clean,
             list_quarantines,
             undo_quarantine,
@@ -719,6 +796,20 @@ mod tests {
         );
         assert!(exe.exists(), "o desfazer devolveu o executável");
     }
+    #[test]
+    fn screen_options_are_read_like_the_command_line_lists() {
+        let sha = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+        let (opts, notes) = read_options(
+            Some(&format!("sha256:{sha}\nnome:x.exe\nlixo\n")),
+            Some("# meu\nbackup.cmd\n"),
+        );
+        assert!(!opts.iocs.is_empty());
+        assert_eq!(opts.allow, vec!["backup.cmd".to_string()]);
+        assert_eq!(notes.len(), 1, "a linha inválida vira aviso: {notes:?}");
+        let (empty, none) = read_options(None, None);
+        assert!(empty.iocs.is_empty() && empty.allow.is_empty() && none.is_empty());
+    }
+
     #[test]
     fn app_info_exposes_the_workspace_version() {
         assert_eq!(app_info().version, env!("CARGO_PKG_VERSION"));

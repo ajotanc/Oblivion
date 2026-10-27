@@ -4,6 +4,7 @@ import { nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { useOblivion } from '../composables/useOblivion'
+import AdvancedOptions from './AdvancedOptions.vue'
 
 const { t } = useI18n()
 const o = useOblivion()
@@ -49,6 +50,8 @@ const start = () =>
       </p>
     </div>
 
+    <AdvancedOptions />
+
     <div class="grid min-h-0 flex-1 gap-4 lg:grid-cols-[18rem_1fr]">
       <ul class="space-y-1.5 text-sm" :aria-label="t('scan.title')">
         <li
@@ -74,7 +77,7 @@ const start = () =>
         </li>
       </ul>
 
-      <!-- Console no estilo do ComboFix (fundo azul, texto claro, fonte monoespaçada), mas acessível. -->
+      <!-- Console (fundo azul, texto claro, fonte monoespaçada), acessível. -->
       <div class="flex min-h-64 flex-col overflow-hidden rounded-xl border border-line bg-console shadow-sm">
         <div class="flex items-center gap-2 bg-console-bar px-3 py-2 text-xs text-console-dim">
           <span class="size-2.5 rounded-full bg-console-dim/60" aria-hidden="true"></span>

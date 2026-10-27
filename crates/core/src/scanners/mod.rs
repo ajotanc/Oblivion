@@ -1,5 +1,8 @@
+#[cfg(windows)]
+mod baseline_win;
 mod browser;
 mod firefox;
+mod known;
 mod mbr;
 mod miner;
 mod network;
@@ -51,6 +54,7 @@ fn failed_scanner(scanner: &'static str, label: &str) -> Finding {
     }
 }
 
+pub(crate) use network::hosts_path;
 pub(crate) use processes::is_critical as is_critical_process;
 
 /// Roda os scanners ao mesmo tempo (o do minerador sozinho leva ~5 s medindo a CPU) e junta os achados.
@@ -124,6 +128,11 @@ pub fn scan_all_with(on_progress: &(dyn Fn(Progress) + Sync)) -> Vec<Finding> {
         ),
         ("Rede (hosts, proxy, DNS)", "rede", Box::new(network::scan)),
         (
+            "Programas indesejados conhecidos",
+            "conhecidos",
+            Box::new(known::scan),
+        ),
+        (
             "Processos escondidos (visão cruzada)",
             "rootkit",
             Box::new(rootkit::scan),
@@ -138,6 +147,11 @@ pub fn scan_all_with(on_progress: &(dyn Fn(Progress) + Sync)) -> Vec<Finding> {
         ));
         jobs.push(("WMI", "wmi", Box::new(wmi_win::scan)));
         jobs.push((
+            "Valores padrão do Windows (boot, LSA, Explorer)",
+            "baseline",
+            Box::new(baseline_win::scan),
+        ));
+        jobs.push((
             "Defesas do Windows (Defender, UAC, firewall)",
             "seguranca",
             Box::new(tamper_win::scan),
@@ -151,6 +165,23 @@ pub fn scan_all_with(on_progress: &(dyn Fn(Progress) + Sync)) -> Vec<Finding> {
     ));
 
     let mut findings = run_parallel(jobs, on_progress);
+    findings.sort_by_key(|f| std::cmp::Reverse(f.severity));
+    findings
+}
+
+/// O que o usuário pode acrescentar a uma varredura (CLI: `--ioc` e `--allow`; interface: opções avançadas).
+#[derive(Debug, Default)]
+pub struct ScanOptions {
+    pub iocs: crate::ioc::Iocs,
+    pub allow: Vec<String>,
+}
+
+/// A varredura completa, igual para a CLI e para a interface: scanners, conferência de IOCs e lista de permissão.
+pub fn scan_with(opts: &ScanOptions, on_progress: &(dyn Fn(Progress) + Sync)) -> Vec<Finding> {
+    let mut findings = scan_all_with(on_progress);
+    let extra = crate::ioc::check(&opts.iocs, &findings);
+    findings.extend(extra);
+    crate::allow::apply(&mut findings, &opts.allow);
     findings.sort_by_key(|f| std::cmp::Reverse(f.severity));
     findings
 }

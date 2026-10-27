@@ -1,0 +1,2 @@
+# Hashes SHA-256 de executáveis maliciosos conhecidos. Formato: um por linha, `sha256:<64 hex>`.
+# Vazia por padrão: preencha com tools/refresh-iocs.ps1 (precisa da sua conta no abuse.ch) ou use --ioc.

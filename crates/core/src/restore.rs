@@ -1,5 +1,5 @@
 //! Ponto de restauração do Windows, para criar antes de qualquer ação que altere o sistema.
-//! Equivale ao restore_pt.vbs do ComboFix, mas com o cmdlet atual (Checkpoint-Computer).
+//! Usa o cmdlet atual do Windows (Checkpoint-Computer).
 
 #[cfg(windows)]
 use std::time::Duration;

@@ -161,11 +161,13 @@ fn scan(p: &Parsed) -> ExitCode {
         eprintln!("\n[!] {}\n", privilege::alert());
     }
 
-    let mut findings = scanners::scan_all();
-    let extra = ioc::check(&iocs, &findings);
-    findings.extend(extra);
-    allow::apply(&mut findings, &patterns);
-    findings.sort_by_key(|f| std::cmp::Reverse(f.severity));
+    let findings = scanners::scan_with(
+        &scanners::ScanOptions {
+            iocs,
+            allow: patterns,
+        },
+        &|_| {},
+    );
     print!("{}", report::text::render(&findings));
 
     if let Some(path) = p.value("--html") {
@@ -225,7 +227,7 @@ fn clean_command(p: &Parsed) -> ExitCode {
         }
     }
 
-    let mut findings = if let Some(path) = p.value("--recipe") {
+    let findings = if let Some(path) = p.value("--recipe") {
         let text = match fs::read_to_string(path) {
             Ok(t) => t,
             Err(e) => {
@@ -240,12 +242,14 @@ fn clean_command(p: &Parsed) -> ExitCode {
         found
     } else {
         eprintln!("Procurando (leva alguns segundos)...");
-        let mut found = scanners::scan_all();
-        let extra = ioc::check(&iocs, &found);
-        found.extend(extra);
-        found
+        scanners::scan_with(
+            &scanners::ScanOptions {
+                iocs,
+                allow: patterns,
+            },
+            &|_| {},
+        )
     };
-    allow::apply(&mut findings, &patterns);
 
     let only: Vec<String> = p.values("--only").into_iter().map(String::from).collect();
     let restore_text = if dry_run {

@@ -1,5 +1,5 @@
 //! Persistência no Windows: tudo que faz um programa iniciar sozinho.
-//! Equivale ao que RegScan.cmd e SuppScan.cmd do ComboFix faziam com swreg/swsc.
+//! Lê direto do registro, sem ferramentas externas.
 use std::{collections::HashMap, env, fs, path::Path, time::Duration};
 
 use winreg::{HKEY, RegKey, enums::*};

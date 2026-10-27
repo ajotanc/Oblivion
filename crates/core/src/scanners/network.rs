@@ -185,7 +185,7 @@ pub fn assess_dns(name_server: &str) -> Vec<String> {
         .collect()
 }
 
-fn hosts_path() -> std::path::PathBuf {
+pub(crate) fn hosts_path() -> std::path::PathBuf {
     if cfg!(windows) {
         let root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
         std::path::PathBuf::from(root).join(r"System32\drivers\etc\hosts")

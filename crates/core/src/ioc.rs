@@ -166,12 +166,23 @@ fn hit(iocs: &Iocs, path: &Path) -> Option<Finding> {
     })
 }
 
-/// Confere os processos em execução e os itens já achados por outros scanners.
+const BUILTIN: &str = include_str!("../data/hashes.txt");
+
+fn merge(a: &Iocs, b: &Iocs) -> Iocs {
+    Iocs {
+        hashes: a.hashes.union(&b.hashes).cloned().collect(),
+        names: a.names.union(&b.names).cloned().collect(),
+    }
+}
+
+/// Confere os processos em execução e os itens já achados por outros scanners, contra a lista embutida
+/// (`data/hashes.txt`) somada à do usuário (`--ioc`).
 pub fn check(iocs: &Iocs, findings: &[Finding]) -> Vec<Finding> {
-    if iocs.is_empty() {
+    let all = merge(iocs, &Iocs::parse(BUILTIN).0);
+    if all.is_empty() {
         return Vec::new();
     }
-    check_paths(iocs, candidates(findings))
+    check_paths(&all, candidates(findings))
 }
 #[cfg(test)]
 mod tests {
@@ -217,7 +228,17 @@ mod tests {
     }
 
     #[test]
-    fn an_empty_list_finds_nothing_and_skips_the_work() {
-        assert!(check(&Iocs::default(), &[]).is_empty());
+    fn the_embedded_list_parses_without_ignored_lines() {
+        let (_, ignored) = Iocs::parse(BUILTIN);
+        assert_eq!(ignored, 0);
+    }
+
+    #[test]
+    fn merging_keeps_entries_from_both_lists() {
+        let (a, _) = Iocs::parse(&format!("{EMPTY_SHA}\n"));
+        let (b, _) = Iocs::parse("nome:x.exe\n");
+        let m = merge(&a, &b);
+        assert_eq!((m.hashes.len(), m.names.len()), (1, 1));
+        assert!(merge(&Iocs::default(), &Iocs::default()).is_empty());
     }
 }

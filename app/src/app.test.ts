@@ -5,6 +5,7 @@ import { nextTick } from 'vue'
 import App from './App.vue'
 import { useOblivion } from './composables/useOblivion'
 import { i18n } from './i18n'
+import { newFilters } from './lib/filter'
 
 /** Fora do app (sem Tauri) a API é a simulada: dá para testar o fluxo inteiro sem o backend. */
 const flush = async (ms = 0) => {
@@ -27,6 +28,10 @@ describe('Oblivion UI', () => {
     state.selected = new Set()
     state.cleanResult = null
     state.scanned = false
+    state.filters = newFilters()
+    state.options.ioc = ''
+    state.notes = []
+    state.recentDone = false
     state.log = []
     state.scanners = {}
     i18n.global.locale.value = 'pt-BR'
@@ -125,6 +130,40 @@ describe('Oblivion UI', () => {
     expect(w.find('[data-testid=result]').exists()).toBe(false)
     w.unmount()
   })
+  it('offers the same extras as the command line: indicators, allow list, recipe and recent files', async () => {
+    const w = mountApp()
+    await flush(20)
+    for (const id of ['adv-ioc', 'adv-allow', 'adv-recipe', 'adv-recipe-apply', 'adv-recent']) {
+      expect(w.find('[data-testid=' + id + ']').exists(), id).toBe(true)
+    }
+    // O botão da receita só vale com texto.
+    expect(w.get('[data-testid=adv-recipe-apply]').attributes('disabled')).toBeDefined()
+    w.unmount()
+  })
+
+  it('a recipe skips the scan and goes straight to review with only what it asked for', async () => {
+    const w = mountApp()
+    await flush(20)
+    await w.get('[data-testid=adv-recipe]').setValue('processo: xmrig.exe')
+    await w.get('[data-testid=adv-recipe-apply]').trigger('click')
+    await flush(400)
+    expect(useOblivion().state.step).toBe('review')
+    expect(w.findAll('[data-testid=row]').length).toBe(2)
+    w.unmount()
+  })
+
+  it('shows the notices for ignored lines and lists recent files as plain text', async () => {
+    const w = mountApp()
+    await flush(20)
+    await w.get('[data-testid=adv-ioc]').setValue('lixo')
+    await scan(w)
+    expect(w.get('[data-testid=notes]').text()).toContain('ignoradas')
+    await w.get('[data-testid=adv-recent]').trigger('click')
+    await flush(50)
+    expect(w.get('[data-testid=recent-result]').text()).toContain('novo-programa.exe')
+    w.unmount()
+  })
+
   it('switches language and keeps working', async () => {
     const w = mountApp()
     await flush(20)

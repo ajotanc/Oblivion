@@ -1,0 +1,633 @@
+//! Reparos: em vez de apagar, devolve ao PADRÃO um valor do sistema que foi adulterado (UAC, Gerenciador de
+//! Tarefas, Defender, proxy, Winlogon, BootExecute...) ou neutraliza uma linha do arquivo hosts.
+//!
+//! Segurança: só mexe em pares (chave, valor) de uma lista fixa (`FIXES`); o `undo` usa a MESMA lista, então
+//! um manifesto adulterado não consegue fazer o Oblivion gravar em outro lugar do registro. Antes de mudar,
+//! guarda o valor antigo no manifesto e exporta a chave para um `.reg` na quarentena.
+use std::path::{Path, PathBuf};
+
+use crate::finding::Finding;
+
+use super::Plan;
+
+/// O que fazer com o valor para voltar ao padrão.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Fix {
+    /// O padrão é o valor não existir.
+    Delete,
+    Str(String),
+    Multi(Vec<String>),
+    Dword(u32),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RegFix {
+    pub hive: &'static str,
+    pub subkey: String,
+    pub name: &'static str,
+    pub fix: Fix,
+}
+
+impl RegFix {
+    pub fn describe(&self) -> String {
+        let to = match &self.fix {
+            Fix::Delete => "removê-lo (o padrão é não existir)".to_string(),
+            Fix::Str(s) => format!("\"{s}\""),
+            Fix::Multi(v) => format!("\"{}\"", v.join(" ")),
+            Fix::Dword(n) => n.to_string(),
+        };
+        format!(
+            "Restaurar o valor \"{}\" de {}\\{} para o padrão: {to} (o valor atual fica guardado na quarentena)",
+            self.name, self.hive, self.subkey
+        )
+    }
+}
+
+const POLICIES_SYSTEM: &str = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System";
+const DEFENDER_RT: &str = r"SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection";
+const FIREWALL: &str = r"SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy";
+const INTERNET: &str = r"Software\Microsoft\Windows\CurrentVersion\Internet Settings";
+const SESSION: &str = r"SYSTEM\CurrentControlSet\Control\Session Manager";
+const WINLOGON: &str = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon";
+
+/// (hive, chave, valor, correção). A lista inteira é a única coisa que o Oblivion reescreve fora das chaves Run.
+fn table() -> Vec<(&'static str, String, &'static str, Fix)> {
+    let root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
+    let mut t: Vec<(&'static str, String, &'static str, Fix)> = vec![
+        ("HKLM", POLICIES_SYSTEM.into(), "EnableLUA", Fix::Dword(1)),
+        (
+            "HKLM",
+            POLICIES_SYSTEM.into(),
+            "ConsentPromptBehaviorAdmin",
+            Fix::Dword(5),
+        ),
+        (
+            "HKLM",
+            POLICIES_SYSTEM.into(),
+            "DisableTaskMgr",
+            Fix::Delete,
+        ),
+        (
+            "HKCU",
+            POLICIES_SYSTEM.into(),
+            "DisableTaskMgr",
+            Fix::Delete,
+        ),
+        (
+            "HKLM",
+            POLICIES_SYSTEM.into(),
+            "DisableRegistryTools",
+            Fix::Delete,
+        ),
+        (
+            "HKCU",
+            POLICIES_SYSTEM.into(),
+            "DisableRegistryTools",
+            Fix::Delete,
+        ),
+        (
+            "HKCU",
+            r"SOFTWARE\Policies\Microsoft\Windows\System".into(),
+            "DisableCMD",
+            Fix::Delete,
+        ),
+        (
+            "HKCU",
+            r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer".into(),
+            "NoFolderOptions",
+            Fix::Delete,
+        ),
+        (
+            "HKLM",
+            r"SOFTWARE\Policies\Microsoft\Windows Defender".into(),
+            "DisableAntiSpyware",
+            Fix::Delete,
+        ),
+        (
+            "HKLM",
+            r"SOFTWARE\Microsoft\Windows Defender".into(),
+            "DisableAntiSpyware",
+            Fix::Delete,
+        ),
+        (
+            "HKLM",
+            DEFENDER_RT.into(),
+            "DisableRealtimeMonitoring",
+            Fix::Delete,
+        ),
+        (
+            "HKLM",
+            DEFENDER_RT.into(),
+            "DisableBehaviorMonitoring",
+            Fix::Delete,
+        ),
+        (
+            "HKLM",
+            DEFENDER_RT.into(),
+            "DisableOnAccessProtection",
+            Fix::Delete,
+        ),
+        (
+            "HKLM",
+            r"SOFTWARE\Policies\Microsoft\Windows\System".into(),
+            "EnableSmartScreen",
+            Fix::Delete,
+        ),
+        (
+            "HKLM",
+            r"SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU".into(),
+            "NoAutoUpdate",
+            Fix::Delete,
+        ),
+        ("HKCU", INTERNET.into(), "ProxyEnable", Fix::Dword(0)),
+        ("HKCU", INTERNET.into(), "AutoConfigURL", Fix::Delete),
+        (
+            "HKLM",
+            SESSION.into(),
+            "BootExecute",
+            Fix::Multi(vec!["autocheck autochk *".into()]),
+        ),
+        ("HKLM", SESSION.into(), "SetupExecute", Fix::Delete),
+        (
+            "HKLM",
+            r"SYSTEM\CurrentControlSet\Control\SafeBoot".into(),
+            "AlternateShell",
+            Fix::Str("cmd.exe".into()),
+        ),
+        ("HKLM", WINLOGON.into(), "Taskman", Fix::Delete),
+        (
+            "HKLM",
+            WINLOGON.into(),
+            "Shell",
+            Fix::Str("explorer.exe".into()),
+        ),
+        (
+            "HKLM",
+            WINLOGON.into(),
+            "Userinit",
+            Fix::Str(format!(r"{root}\system32\userinit.exe,")),
+        ),
+    ];
+    for profile in ["StandardProfile", "DomainProfile", "PublicProfile"] {
+        t.push((
+            "HKLM",
+            format!(r"{FIREWALL}\{profile}"),
+            "EnableFirewall",
+            Fix::Dword(1),
+        ));
+    }
+    t
+}
+
+/// A correção prevista para este par, se ele estiver na lista fixa (sem diferenciar maiúsculas).
+pub fn fix_for(hive: &str, subkey: &str, name: &str) -> Option<RegFix> {
+    table().into_iter().find_map(|(h, s, n, fix)| {
+        (h.eq_ignore_ascii_case(hive)
+            && s.eq_ignore_ascii_case(subkey)
+            && n.eq_ignore_ascii_case(name))
+        .then_some(RegFix {
+            hive: h,
+            subkey: s,
+            name: n,
+            fix,
+        })
+    })
+}
+
+/// O `undo` só restaura pares que o Oblivion poderia ter alterado.
+pub fn is_allowed(hive: &str, subkey: &str, name: &str) -> bool {
+    fix_for(hive, subkey, name).is_some()
+}
+
+/// Plano de reparo para um achado, se existir um padrão seguro para ele.
+pub fn plan_for(f: &Finding) -> Option<Plan> {
+    match f.scanner {
+        "seguranca" | "baseline" | "persistencia" => {
+            let (hive, subkey) = f.location.split_once('\\')?;
+            // Em "persistencia" só o Winlogon entra aqui; as chaves Run seguem o plano de remoção.
+            if f.scanner == "persistencia" && !subkey.eq_ignore_ascii_case(WINLOGON) {
+                return None;
+            }
+            fix_for(hive, subkey, &f.name).map(Plan::Repair)
+        }
+        "rede" => {
+            if f.name == "Entrada do hosts" {
+                return Some(Plan::Hosts {
+                    entry: f.target.clone(),
+                });
+            }
+            let (hive, subkey) = f.location.split_once('\\')?;
+            if !subkey.eq_ignore_ascii_case(INTERNET) {
+                return None;
+            }
+            let name = if f.name == "Proxy ativado" {
+                "ProxyEnable"
+            } else {
+                "AutoConfigURL"
+            };
+            fix_for(hive, subkey, name).map(Plan::Repair)
+        }
+        _ => None,
+    }
+}
+
+// ---------- hosts (qualquer sistema) ----------
+
+pub(crate) fn hosts_path() -> PathBuf {
+    crate::scanners::hosts_path()
+}
+
+/// Comenta as linhas do hosts cujo "IP nome" é o `entry`. `None` se nenhuma linha casar.
+pub fn comment_out(content: &str, entry: &str) -> Option<String> {
+    let want: Vec<String> = entry.split_whitespace().map(str::to_lowercase).collect();
+    let mut changed = false;
+    let lines: Vec<String> = content
+        .lines()
+        .map(|line| {
+            let body = line.split('#').next().unwrap_or("");
+            let toks: Vec<String> = body.split_whitespace().map(str::to_lowercase).collect();
+            let hit = !line.trim_start().starts_with('#')
+                && toks.len() >= 2
+                && toks[0] == want[0]
+                && toks[1..]
+                    .iter()
+                    .any(|h| want.get(1).is_some_and(|w| w == h));
+            if hit {
+                changed = true;
+                format!("# [Oblivion] {line}")
+            } else {
+                line.to_string()
+            }
+        })
+        .collect();
+    changed.then(|| lines.join("\n") + "\n")
+}
+
+/// Ordem do reparo do hosts: guarda o arquivo inteiro antes, reescreve, e confere.
+pub(super) fn repair_hosts(entry: &str, dir: &Path) -> super::Exec {
+    use super::{Exec, Outcome};
+    use serde_json::json;
+    let fail = |why: String| Exec {
+        outcome: Outcome::Failed(why),
+        note: String::new(),
+        undo: Vec::new(),
+    };
+    let path = hosts_path();
+    let Ok(bytes) = std::fs::read(&path) else {
+        return Exec {
+            outcome: Outcome::Skipped("não consegui ler o arquivo hosts".into()),
+            note: String::new(),
+            undo: Vec::new(),
+        };
+    };
+    let content = String::from_utf8_lossy(&bytes).into_owned();
+    if entry.split_whitespace().count() < 2 {
+        return Exec {
+            outcome: Outcome::Skipped("entrada do hosts inválida".into()),
+            note: String::new(),
+            undo: Vec::new(),
+        };
+    }
+    let Some(new) = comment_out(&content, entry) else {
+        return Exec {
+            outcome: Outcome::Skipped("a linha já não está no hosts".into()),
+            note: String::new(),
+            undo: Vec::new(),
+        };
+    };
+    let folder = dir.join("files");
+    let mut backup = folder.join("hosts.bak");
+    let mut n = 1;
+    if let Err(e) = std::fs::create_dir_all(&folder) {
+        return fail(format!("não consegui criar a quarentena: {e}"));
+    }
+    while backup.exists() {
+        backup = folder.join(format!("hosts.{n}.bak"));
+        n += 1;
+    }
+    if let Err(e) = std::fs::write(&backup, &bytes) {
+        return fail(format!("não consegui guardar o hosts na quarentena: {e}"));
+    }
+    if let Err(e) = std::fs::write(&path, new.as_bytes()) {
+        let _ = std::fs::remove_file(&backup);
+        return fail(format!("não consegui gravar o hosts (administrador?): {e}"));
+    }
+    Exec {
+        outcome: Outcome::Done,
+        note: format!(
+            "Linha comentada no hosts; original guardado em {}.",
+            backup.display()
+        ),
+        undo: vec![json!({"kind": "hosts", "from": backup, "to": path})],
+    }
+}
+
+/// Usado pelo `undo`: devolve o hosts guardado, só para o próprio arquivo hosts.
+pub(crate) fn restore_hosts(dir: &Path, entry: &serde_json::Value) -> Result<(), String> {
+    let from = Path::new(entry["from"].as_str().ok_or("registro sem origem")?);
+    let to = Path::new(entry["to"].as_str().ok_or("registro sem destino")?);
+    if to != hosts_path() {
+        return Err("o destino não é o arquivo hosts: não restaurei".into());
+    }
+    if !super::secure::is_inside(dir, from) || !from.is_file() {
+        return Err(
+            "a cópia do hosts não está dentro da quarentena (manifesto adulterado?)".into(),
+        );
+    }
+    std::fs::copy(from, to)
+        .map(|_| ())
+        .map_err(|e| format!("não consegui restaurar o hosts: {e}"))
+}
+
+// ---------- registro (Windows) ----------
+
+#[cfg(windows)]
+pub(super) use win::{repair_value, restore_reg_value};
+
+#[cfg(windows)]
+mod win {
+    use std::{path::Path, process::Command};
+
+    use serde_json::json;
+    use winreg::{RegKey, RegValue, enums::*, types::ToRegValue};
+
+    use super::{Fix, RegFix, is_allowed};
+    use crate::clean::{Exec, Outcome};
+
+    fn root(hive: &str) -> Option<winreg::HKEY> {
+        match hive {
+            "HKLM" => Some(HKEY_LOCAL_MACHINE),
+            "HKCU" => Some(HKEY_CURRENT_USER),
+            _ => None,
+        }
+    }
+
+    fn skipped(why: &str) -> Exec {
+        Exec {
+            outcome: Outcome::Skipped(why.into()),
+            note: String::new(),
+            undo: Vec::new(),
+        }
+    }
+
+    fn failed(why: String) -> Exec {
+        Exec {
+            outcome: Outcome::Failed(why),
+            note: String::new(),
+            undo: Vec::new(),
+        }
+    }
+
+    fn desired(fix: &Fix) -> Option<RegValue> {
+        match fix {
+            Fix::Delete => None,
+            Fix::Str(s) => Some(s.as_str().to_reg_value()),
+            Fix::Multi(v) => Some(v.to_reg_value()),
+            Fix::Dword(n) => Some(n.to_reg_value()),
+        }
+    }
+
+    fn hex(bytes: &[u8]) -> String {
+        bytes.iter().map(|b| format!("{b:02x}")).collect()
+    }
+
+    fn unhex(s: &str) -> Option<Vec<u8>> {
+        if !s.len().is_multiple_of(2) {
+            return None;
+        }
+        (0..s.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(s.get(i..i + 2)?, 16).ok())
+            .collect()
+    }
+
+    /// Exporta a chave para um .reg na quarentena (rede de segurança extra; o valor também fica no manifesto).
+    fn export_key(hive: &str, subkey: &str, dir: &Path) -> Option<std::path::PathBuf> {
+        let folder = dir.join("registry");
+        std::fs::create_dir_all(&folder).ok()?;
+        let mut file = folder.join("backup.reg");
+        let mut n = 1;
+        while file.exists() {
+            file = folder.join(format!("backup.{n}.reg"));
+            n += 1;
+        }
+        let reg = Path::new(&std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into()))
+            .join(r"System32\reg.exe");
+        let ok = Command::new(reg)
+            .args(["export", &format!(r"{hive}\{subkey}")])
+            .arg(&file)
+            .arg("/y")
+            .output()
+            .is_ok_and(|o| o.status.success());
+        ok.then_some(file)
+    }
+
+    pub(in crate::clean) fn repair_value(fix: &RegFix, dir: &Path) -> Exec {
+        let Some(r) = root(fix.hive) else {
+            return skipped("chave de registro desconhecida");
+        };
+        let key = match RegKey::predef(r).open_subkey_with_flags(&fix.subkey, KEY_READ | KEY_WRITE)
+        {
+            Ok(k) => k,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return skipped("a chave já não existe");
+            }
+            Err(e) => return failed(format!("não consegui abrir a chave (administrador?): {e}")),
+        };
+        let old = key.get_raw_value(fix.name).ok();
+        let want = desired(&fix.fix);
+        match (&old, &want) {
+            (None, None) => return skipped("o valor já não existe (já está no padrão)"),
+            (Some(o), Some(w)) if o.bytes == w.bytes && o.vtype == w.vtype => {
+                return skipped("o valor já está no padrão");
+            }
+            _ => {}
+        }
+        // Guarda ANTES de mexer: .reg exportado + o valor antigo no manifesto.
+        let exported = export_key(fix.hive, &fix.subkey, dir);
+        let undo = json!({
+            "kind": "reg_value", "hive": fix.hive, "subkey": fix.subkey, "name": fix.name,
+            "existed": old.is_some(),
+            "vtype": old.as_ref().map(|o| o.vtype.clone() as u32),
+            "data": old.as_ref().map(|o| hex(&o.bytes)),
+        });
+        let result = match &want {
+            Some(w) => key.set_raw_value(fix.name, w),
+            None => key.delete_value(fix.name),
+        };
+        if let Err(e) = result {
+            return failed(format!("não consegui alterar o valor: {e}"));
+        }
+        let now = key.get_raw_value(fix.name).ok();
+        let ok = match &want {
+            Some(w) => now.is_some_and(|n| n.bytes == w.bytes),
+            None => now.is_none(),
+        };
+        if !ok {
+            return failed("o valor não ficou como esperado depois da alteração".into());
+        }
+        let backup = exported.map_or("sem .reg (valor guardado no manifesto)".to_string(), |p| {
+            format!("backup em {}", p.display())
+        });
+        Exec {
+            outcome: Outcome::Done,
+            note: format!("Valor restaurado ao padrão; {backup}."),
+            undo: vec![undo],
+        }
+    }
+
+    /// Usado pelo `undo`: devolve o valor antigo, só para pares da lista fixa.
+    pub(crate) fn restore_reg_value(entry: &serde_json::Value) -> Result<(), String> {
+        let get = |k: &str| entry[k].as_str().ok_or_else(|| format!("registro sem {k}"));
+        let (hive, subkey, name) = (get("hive")?, get("subkey")?, get("name")?);
+        if !is_allowed(hive, subkey, name) {
+            return Err("esse valor não está entre os que o Oblivion altera: não restaurei".into());
+        }
+        let r = root(hive).ok_or("chave desconhecida")?;
+        let (key, _) = RegKey::predef(r)
+            .create_subkey_with_flags(subkey, KEY_READ | KEY_WRITE)
+            .map_err(|e| format!("não consegui abrir a chave: {e}"))?;
+        if entry["existed"].as_bool().unwrap_or(false) {
+            let vtype = entry["vtype"].as_u64().ok_or("registro sem tipo")? as u32;
+            let bytes = unhex(entry["data"].as_str().ok_or("registro sem dados")?)
+                .ok_or("dados inválidos")?;
+            let vtype = match vtype {
+                1 => REG_SZ,
+                2 => REG_EXPAND_SZ,
+                3 => REG_BINARY,
+                4 => REG_DWORD,
+                7 => REG_MULTI_SZ,
+                _ => return Err("tipo de valor não suportado".into()),
+            };
+            key.set_raw_value(name, &RegValue { bytes, vtype })
+                .map_err(|e| format!("não consegui gravar o valor: {e}"))
+        } else {
+            match key.delete_value(name) {
+                Ok(()) => Ok(()),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                Err(e) => Err(format!("não consegui remover o valor: {e}")),
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::finding::Severity;
+
+    fn finding(scanner: &'static str, location: &str, name: &str, target: &str) -> Finding {
+        Finding {
+            scanner,
+            location: location.into(),
+            name: name.into(),
+            target: target.into(),
+            severity: Severity::Suspicious,
+            reason: "r",
+        }
+    }
+
+    #[test]
+    fn only_listed_pairs_have_a_fix_and_matching_ignores_case() {
+        assert!(fix_for("hklm", &POLICIES_SYSTEM.to_lowercase(), "enablelua").is_some());
+        assert!(fix_for("HKLM", r"SYSTEM\CurrentControlSet\Services", "ImagePath").is_none());
+        assert!(!is_allowed(
+            "HKCU",
+            r"Software\Microsoft\Windows\CurrentVersion\Run",
+            "x"
+        ));
+    }
+
+    #[test]
+    fn findings_from_the_scanners_map_to_repairs() {
+        let uac = finding(
+            "seguranca",
+            &format!(r"HKLM\{POLICIES_SYSTEM}"),
+            "EnableLUA",
+            "EnableLUA = 0",
+        );
+        assert!(matches!(plan_for(&uac), Some(Plan::Repair(r)) if r.fix == Fix::Dword(1)));
+        let proxy = finding(
+            "rede",
+            &format!(r"HKCU\{INTERNET}"),
+            "Proxy ativado",
+            "1.2.3.4:80",
+        );
+        assert!(matches!(plan_for(&proxy), Some(Plan::Repair(r)) if r.name == "ProxyEnable"));
+        let pac = finding(
+            "rede",
+            &format!(r"HKCU\{INTERNET}"),
+            "Script de configuração automática do proxy",
+            "http://x",
+        );
+        assert!(matches!(plan_for(&pac), Some(Plan::Repair(r)) if r.name == "AutoConfigURL"));
+        let hosts = finding(
+            "rede",
+            "C:/Windows/hosts",
+            "Entrada do hosts",
+            "1.2.3.4 a.com",
+        );
+        assert!(matches!(plan_for(&hosts), Some(Plan::Hosts { .. })));
+        // Chave Run continua com o plano de remoção, e valores fora da lista não ganham reparo.
+        let run = finding(
+            "persistencia",
+            r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run",
+            "x",
+            "c:\\a.exe",
+        );
+        assert!(plan_for(&run).is_none());
+        let other = finding("seguranca", r"HKLM\SOFTWARE\Algo", "Qualquer", "x");
+        assert!(plan_for(&other).is_none());
+        let sh = finding(
+            "persistencia",
+            &format!(r"HKLM\{WINLOGON}"),
+            "Shell",
+            "evil.exe",
+        );
+        assert!(
+            matches!(plan_for(&sh), Some(Plan::Repair(r)) if r.fix == Fix::Str("explorer.exe".into()))
+        );
+    }
+
+    #[test]
+    fn hosts_lines_are_commented_not_deleted_and_only_the_matching_ones() {
+        let hosts = "127.0.0.1 localhost\n1.2.3.4 banco.com www.banco.com # x\n5.6.7.8 outro.com\n";
+        let out = comment_out(hosts, "1.2.3.4 banco.com").unwrap();
+        assert!(out.contains("127.0.0.1 localhost\n"));
+        assert!(out.contains("# [Oblivion] 1.2.3.4 banco.com www.banco.com # x"));
+        assert!(out.contains("\n5.6.7.8 outro.com\n"));
+        assert!(comment_out(hosts, "9.9.9.9 nada.com").is_none());
+        // Linha já comentada não conta.
+        assert!(comment_out("# 1.2.3.4 banco.com\n", "1.2.3.4 banco.com").is_none());
+    }
+
+    #[test]
+    fn describe_tells_what_will_be_set() {
+        let r = fix_for("HKLM", POLICIES_SYSTEM, "EnableLUA").unwrap();
+        assert!(r.describe().contains("EnableLUA") && r.describe().contains('1'));
+        assert!(
+            fix_for("HKLM", POLICIES_SYSTEM, "DisableTaskMgr")
+                .unwrap()
+                .describe()
+                .contains("removê-lo")
+        );
+    }
+
+    #[test]
+    fn restoring_the_hosts_refuses_other_destinations_and_files_outside_quarantine() {
+        let dir = std::env::temp_dir().join(format!("oblivion-hosts-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let bak = dir.join("hosts.bak");
+        std::fs::write(&bak, "x").unwrap();
+        let elsewhere = serde_json::json!({"from": bak, "to": dir.join("outro")});
+        assert!(
+            restore_hosts(&dir, &elsewhere)
+                .unwrap_err()
+                .contains("não é o arquivo hosts")
+        );
+        let outside =
+            serde_json::json!({"from": std::env::temp_dir().join("fora"), "to": hosts_path()});
+        assert!(restore_hosts(&dir, &outside).is_err());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+}
