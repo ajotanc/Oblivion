@@ -2093,14 +2093,14 @@ dependencies = [
 
 [[package]]
 name = "oblivion"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "oblivion-core",
 ]
 
 [[package]]
 name = "oblivion-app"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "oblivion-core",
  "serde",
@@ -2112,7 +2112,7 @@ dependencies = [
 
 [[package]]
 name = "oblivion-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde_json",
  "sha2",

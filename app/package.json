@@ -4,7 +4,7 @@
   "license": "GPL-3.0-only",
   "author": "Alerson Jorge",
   "repository": "github:ajotanc/Oblivion",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "description": "Interface gráfica do Oblivion (Tauri 2 + Vue 3)",
   "scripts": {
