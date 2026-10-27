@@ -1,0 +1,22 @@
+﻿# Compilação
+/target/
+
+# Amostra de malware e arquivos extraídos (só para estudo; nunca versionar nem empacotar)
+/_research/
+
+# Relatórios gerados: têm caminhos e programas instalados do seu computador
+/relatorio*.html
+/*.quarantined
+
+# Quarentenas geradas em testes
+/quarantine/
+
+# Interface (Tauri + Vue)
+/app/node_modules/
+/app/dist/
+/app/src-tauri/gen/
+
+# Executáveis: vão em "Releases" com o hash, não no código
+/dist/
+
+*.log

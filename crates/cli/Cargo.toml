@@ -1,0 +1,7 @@
+[package]
+name = "oblivion"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+oblivion-core = { path = "../core" }

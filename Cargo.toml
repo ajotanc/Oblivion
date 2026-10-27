@@ -1,0 +1,14 @@
+[workspace]
+members = ["crates/core", "crates/cli", "app/src-tauri"]
+resolver = "3"
+
+# VersÃ£o Ãºnica do projeto: o CLI e a interface mostram esta mesma.
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+# `license` e `repository` ficam em aberto atÃ© o dono do projeto decidir (licenÃ§a) e o repositÃ³rio existir.
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

@@ -1,0 +1,160 @@
+# Oblivion
+
+Sucessor moderno do ComboFix, escrito em Rust, para Windows e Linux. Dois modos separados:
+
+- **`scan`**: só leitura. Identifica o que existe e gera um relatório. Nada é alterado.
+- **`clean`**: opt-in. Procura, **remove com a sua confirmação** e gera o relatório do que foi feito.
+  Guarda tudo em quarentena e dá para desfazer (`undo`).
+
+Os achados são indícios, não veredito. Nenhuma ferramenta detecta "qualquer malware".
+
+## Interface gráfica
+
+O Oblivion tem uma interface no estilo do ComboFix (um console com o log da varredura ao vivo), modernizada:
+tema claro/escuro, português e inglês, filtros, confirmação antes de remover e histórico de quarentenas com
+desfazer. A **versão aparece sempre** no cabeçalho e no rodapé (e `oblivion --version` no terminal).
+Passos: **1. Escanear** (só leitura) → **2. Revisar** (filtros e seleção) → **3. Limpar** (simulação ou remoção
+com confirmação) → **4. Histórico** (desfazer). Sem administrador, a tela avisa e oferece reiniciar como
+administrador; a simulação funciona sem ele.
+
+```bash
+cd app
+pnpm install
+pnpm tauri dev       # abre a janela (desenvolvimento)
+pnpm tauri build     # gera o instalador
+pnpm test            # testes do frontend (Vitest)
+```
+
+A interface é Tauri 2 + Vue 3 + TypeScript + Tailwind, chama o mesmo núcleo Rust do CLI, não abre porta de rede
+e manda ao backend só **números** de achados (o backend guarda os achados e resolve caminhos e comandos).
+Não há atualização automática: foi retirada a pedido e fica para uma fase futura.
+
+## Uso (linha de comando)
+
+```bash
+oblivion scan --html relatorio.html          # só leitura
+oblivion clean --dry-run                     # mostra o que seria removido, sem mudar nada
+oblivion clean                               # remove, perguntando item a item (administrador/root)
+oblivion clean --only NOME --report r.html   # só os itens cujo nome/alvo contém NOME
+oblivion clean --yes                         # dispensa a pergunta só para itens ALTOS e entradas órfãs
+oblivion undo PASTA_DA_QUARENTENA            # devolve o que a limpeza removeu
+oblivion restore-point                       # cria um ponto de restauração (Windows, administrador)
+oblivion --help                              # mostra o uso
+oblivion --version                           # mostra a versão
+```
+
+Durante o desenvolvimento: `cargo run -p oblivion -- scan`, `cargo test`.
+
+### Como a remoção protege você
+
+1. Só age em itens **SUSPEITO** ou **ALTO**. INFO nunca.
+2. **Pergunta** antes de cada ação. `--yes` cobre só ALTO e entradas órfãs; os outros SUSPEITOS sempre perguntam.
+   Para **processos**, o `--yes` só vale quando o motivo é o sinal forte (nome ou argumentos de minerador):
+   CPU e GPU altas juntas também descrevem um editor de vídeo ou um jogo, e esses sempre perguntam.
+3. **Ponto de restauração** antes de remover (Windows). Sem ele o Oblivion não remove nada, a menos que
+   você use `--no-restore-point`. Um ponto criado nas últimas 24 h conta (o Windows só cria um por dia).
+4. **Revalida** o item antes de agir: se o valor, a tarefa ou o processo mudou desde o scan, ele é ignorado.
+5. **Quarentena reversível e privada**: o que foi apagado fica em `%ProgramData%\Oblivion\Quarantine\q<hora>`
+   (Windows) ou `/var/lib/oblivion/quarantine` (Linux), com `manifest.json` e `report.html`. A pasta é criada
+   **só para administradores/SYSTEM** (Windows: dono Administradores e permissões restritas; Linux: modo `0700`),
+   porque em `ProgramData` usuários comuns conseguem criar pastas e um deles poderia trocar o manifesto ou usar
+   uma junção para fazer o administrador gravar em outro lugar. Duas limpezas no mesmo segundo ganham pastas
+   diferentes (`q…` e `q…-1`). Arquivos movidos ganham o sufixo `.quarantined` (e perdem a permissão de execução no Linux).
+6. **`undo` desconfia do manifesto**: antes de ler, confere que a pasta (e a pasta pai) é privada, que não é
+   link e que pertence a quem executa; só devolve arquivos que estão DENTRO da quarentena, nunca para uma pasta
+   do sistema, só recria valores nas chaves Run e só recria tarefas a partir de um XML da quarentena. Nunca sobrescreve nada.
+7. **Só remove o que sabe desfazer**: valor `Run`, tarefa agendada, item da pasta Startup, processo (e o
+   executável dele, se estiver numa pasta do usuário como AppData ou Temp). Serviços, Winlogon, WMI,
+   extensões de navegador e MBR **não** são removidos sozinhos: o relatório diz o que fazer à mão.
+8. Nunca move arquivo da pasta do Windows (ou `/usr`, `/etc`...), e nunca altera o MBR.
+9. Se não conseguir gravar o registro do que fez, **para** (não age sem registro).
+
+## Funcionalidade total exige administrador/root
+
+O `scan` roda sem elevação, mas com cobertura reduzida: tarefas agendadas, setor de boot (MBR) e ponto de
+restauração exigem **administrador** (Windows); crontabs de usuários, MBR e detalhes de rede de outros
+usuários exigem **root** (Linux, use `sudo`). Sem elevação o programa avisa antes de varrer, repete um
+lembrete no fim (stderr) e o relatório HTML abre com um alerta. O `clean` **exige** elevação (só o
+`--dry-run` roda sem ela).
+
+## Lista `--allow`
+
+Arquivo de texto, um padrão por linha (`#` comenta). O padrão deve ser **igual** ao nome ou à linha de
+comando inteira do achado (copie o "alvo" do relatório), sem diferenciar maiúsculas; um `*` no fim vale como
+prefixo. Itens SUSPEITOS que casam passam a INFO; ALTOS nunca são escondidos. Casar por "contém" foi
+descartado de propósito: um malware poderia escapar só citando o seu padrão como argumento.
+
+## Estrutura (um domínio por pasta)
+
+```text
+crates/
+  core/src/
+    finding.rs, classify.rs, allow.rs, privilege.rs, restore.rs, sys.rs, trust.rs
+    scanners/   persistence_win, persistence_linux, tasks_win, wmi_win, miner, browser, firefox, mbr
+    clean/      plano, execução, quarentena e desfazer (remoção opt-in)
+    report/     text, html, clean (relatório do que foi feito)
+  cli/src/      main.rs (comandos) e args.rs (leitura estrita dos argumentos)
+app/
+  src/          interface Vue (componentes, composables, i18n, API real e simulada)
+  src-tauri/    backend Tauri (comandos que usam o núcleo)
+docs/ESTUDO.md              # mapa ComboFix -> Oblivion
+_research/                  # binário e arquivos extraídos do ComboFix (NÃO executar)
+```
+
+## Convenções (de `D:\Apps\utility_project_guidelines.md`)
+
+- Identificadores em inglês, comentários e textos exibidos em português (pt-BR).
+  Em Rust os nomes seguem `snake_case`/`PascalCase` (exigência do compilador), não `camelCase`.
+- Sem rede e sem telemetria. Dados do sistema são tratados como hostis: escapados no HTML e com
+  caracteres de controle neutralizados no terminal (com teste).
+- Relatório acessível: contraste AA, gravidade por texto (não só cor), foco visível, link para pular conteúdo.
+- Sem promessas de segurança absoluta: o relatório diz que são indícios.
+
+## Executável
+
+`cargo build --release` gera o CLI em `target/release/oblivion.exe`; a interface sai com `pnpm tauri build`
+(dentro de `app/`). Os binários **não ficam no repositório**: devem ir em "Releases" junto do SHA-256. Confira o
+hash antes de usar; o executável **não é assinado digitalmente**, então o SmartScreen ou o antivírus podem alertar:
+
+```bash
+certutil -hashfile oblivion.exe SHA256   # compare com o hash publicado na release
+```
+
+## Limites conhecidos
+
+- Programas legítimos **sem** assinatura digital em AppData/ProgramData ainda aparecem como SUSPEITO.
+  A assinatura reduz falso positivo, mas não prova inocência: malware também pode ser assinado.
+- Não faz varredura de arquivos por assinatura/hash/YARA: não é um antivírus.
+- A detecção de elevação é um teste prático (Windows: abrir o disco cru para leitura; Linux: dono do
+  processo é o root), não a leitura do token de elevação.
+- Atalhos `.lnk` da pasta Startup têm o destino resolvido; se a resolução falhar, classifica só pelo nome.
+- Um endereço de rede (`http://`, `https://`) sozinho na linha de comando é SUSPEITO (comum em atalhos de
+  aplicativos web); só vira ALTO junto de `powershell`, `certutil`, `bitsadmin`, `regsvr32`, `curl`, etc.
+- "Entrada órfã" (arquivo sumiu) só é julgada se a unidade existe agora: unidades de rede mapeadas na sessão
+  normal (que o terminal elevado não enxerga) e pendrives desconectados não contam, e caminhos de rede (`\\servidor`) não são julgados.
+- Persistência no Windows, além de Run/RunOnce, Winlogon (do computador e do usuário), Startup, serviços e tarefas:
+  `Policies\Explorer\Run`, `ServiceDll` dos serviços `svchost`, drivers de terceiros que iniciam com o Windows,
+  `Image File Execution Options` (`Debugger`), `AppInit_DLLs`, tarefas do tipo `ComHandler` (a DLL da classe COM
+  é resolvida pelo registro) e as chaves Run das **outras contas com perfil carregado** (só com administrador;
+  perfis de contas desligadas não são lidos). Ainda não cobre: drivers do próprio Windows, WMI de outros
+  namespaces e a substituição de um arquivo do sistema por outro sem assinatura (não há verificação de hash).
+- `ServiceDll` e drivers entram como INFO (centenas de linhas); só viram SUSPEITOS quando saem das pastas
+  padrão ou o arquivo sumiu. IFEO e AppInit_DLLs com qualquer valor são pelo menos SUSPEITOS.
+- **Remoção no Linux**: por enquanto só encerra processos (e move o executável). Cron, units do systemd e
+  autostart são identificados mas ficam como instrução manual.
+- **Remoção no Windows**: não cobre serviços, Winlogon, WMI, extensões nem MBR (instrução manual).
+- O scan roda os scanners **em paralelo** (cerca de 6 s; o do minerador sozinho mede a CPU por 4 s). Se um
+  scanner quebrar por erro interno, o relatório mostra "Scanner ... falhou" em vez de omitir essa parte.
+- Minerador: sinais Sinais: nome/argumentos, CPU sustentada, GPU em
+  computação e conexão a portas de pools; um sinal fraco é SUSPEITO, dois ou mais são ALTO. A GPU é uma
+  amostra única (Windows: contadores do sistema; Linux: `nvidia-smi`, só NVIDIA) e nunca foi testada com
+  placa real. Mineradores renomeados, sem argumentos típicos e de baixo uso passam despercebidos.
+- Extensões: Chromium (Chrome, Edge, Brave, Vivaldi, Opera) e Firefox, só do usuário atual. A heurística
+  olha as permissões; não verifica a loja nem o código. Só `proxy`/`debugger` com acesso a todos os sites
+  vira SUSPEITO. A isenção `...Private` vale só para IDs de componentes embutidos conhecidos (hoje: Opera AI).
+- WMI: só consumidores de comando e de script (sempre SUSPEITO); filtros e vínculos isolados são ignorados.
+- MBR: só o INÍCIO do código de boot é comparado (Windows/DOS e GRUB); código desconhecido é SUSPEITO, o
+  que não prova bootkit. Em disco GPT o código é ignorado em boot UEFI, e o Oblivion ainda não detecta se o
+  PC inicia em UEFI ou BIOS legado.
+- Linux: verificado num container Debian; não testado em outras distros. Rede do minerador usa `ss`
+  (instale `iproute2`; sem root só vê os processos do próprio usuário).

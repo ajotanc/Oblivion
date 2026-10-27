@@ -1,0 +1,135 @@
+@import 'tailwindcss';
+@import '@fontsource-variable/inter';
+@import '@fontsource/jetbrains-mono/400.css';
+@import '@fontsource/jetbrains-mono/600.css';
+
+/* Tokens de cor. O console azul é uma homenagem ao ComboFix (`COLOR 17`: fundo azul, texto branco). */
+:root {
+  --bg: #f4f6fb;
+  --card: #ffffff;
+  --fg: #14213d;
+  --muted: #4a5772;
+  --line: #d6dcea;
+  --primary: #1d4ed8;
+  --primary-fg: #ffffff;
+  --high: #b42318;
+  --high-bg: #fde8e6;
+  --susp: #92400e;
+  --susp-bg: #fef3c7;
+  --info: #1d4ed8;
+  --info-bg: #e0e9ff;
+  --ok: #15803d;
+  --ok-bg: #dcfce7;
+  --console: #0a1f44;
+  --console-bar: #0f2c5e;
+  --console-fg: #e6f0ff;
+  --console-dim: #9db8e8;
+  color-scheme: light;
+}
+
+:root[data-theme='dark'] {
+  --bg: #0b1220;
+  --card: #111a2e;
+  --fg: #e6ecfa;
+  --muted: #9db0d0;
+  --line: #26334f;
+  --primary: #6b96ff;
+  --primary-fg: #08122b;
+  --high: #ff8a80;
+  --high-bg: #3b1613;
+  --susp: #fbbf24;
+  --susp-bg: #3a2a07;
+  --info: #8ab4f8;
+  --info-bg: #14264b;
+  --ok: #4ade80;
+  --ok-bg: #0f2e1b;
+  --console: #06132b;
+  --console-bar: #0b2250;
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --bg: #0b1220;
+    --card: #111a2e;
+    --fg: #e6ecfa;
+    --muted: #9db0d0;
+    --line: #26334f;
+    --primary: #6b96ff;
+    --primary-fg: #08122b;
+    --high: #ff8a80;
+    --high-bg: #3b1613;
+    --susp: #fbbf24;
+    --susp-bg: #3a2a07;
+    --info: #8ab4f8;
+    --info-bg: #14264b;
+    --ok: #4ade80;
+    --ok-bg: #0f2e1b;
+    --console: #06132b;
+    --console-bar: #0b2250;
+    color-scheme: dark;
+  }
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-card: var(--card);
+  --color-fg: var(--fg);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-primary: var(--primary);
+  --color-primary-fg: var(--primary-fg);
+  --color-high: var(--high);
+  --color-high-bg: var(--high-bg);
+  --color-susp: var(--susp);
+  --color-susp-bg: var(--susp-bg);
+  --color-info: var(--info);
+  --color-info-bg: var(--info-bg);
+  --color-ok: var(--ok);
+  --color-ok-bg: var(--ok-bg);
+  --color-console: var(--console);
+  --color-console-bar: var(--console-bar);
+  --color-console-fg: var(--console-fg);
+  --color-console-dim: var(--console-dim);
+  --font-sans: 'Inter Variable', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'Cascadia Mono', monospace;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+:focus-visible {
+  outline: 3px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* Respeita quem pediu menos movimento. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
+.cursor-blink {
+  animation: blink 1.1s steps(1) infinite;
+}
