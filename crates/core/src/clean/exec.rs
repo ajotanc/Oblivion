@@ -44,6 +44,8 @@ pub fn execute(plan: &Plan, f: &Finding, dir: &Path) -> Exec {
         #[cfg(windows)]
         Plan::Repair(fix) => super::repair::repair_value(fix, dir),
         Plan::Hosts { entry } => super::repair::repair_hosts(entry, dir),
+        #[cfg(windows)]
+        Plan::Wmi { name, class } => super::wmi::remove(name, class, f, dir),
         _ => skipped("ação não disponível neste sistema"),
     }
 }

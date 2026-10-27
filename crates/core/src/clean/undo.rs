@@ -59,6 +59,10 @@ fn describe(entry: &Value) -> String {
             entry["subkey"].as_str().unwrap_or("?")
         ),
         Some("hosts") => "Devolver o arquivo hosts ao que era antes".to_string(),
+        Some("wmi") => format!(
+            "Recriar a assinatura do WMI \"{}\"",
+            entry["name"].as_str().unwrap_or("?")
+        ),
         Some("task") => format!(
             "Recriar a tarefa \"{}\"",
             entry["name"].as_str().unwrap_or("?")
@@ -77,6 +81,8 @@ fn restore_entry(dir: &Path, entry: &Value) -> Result<(), String> {
         #[cfg(windows)]
         Some("reg_value") => super::repair::restore_reg_value(entry),
         Some("hosts") => super::repair::restore_hosts(dir, entry),
+        #[cfg(windows)]
+        Some("wmi") => super::wmi::restore(dir, entry),
         _ => {
             let _ = dir;
             Err("tipo de item não suportado neste sistema".into())

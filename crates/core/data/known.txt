@@ -49,3 +49,34 @@ pup:webssearches
 pup:sweetim
 pup:sweet-page
 pup:snap.do
+
+# Adware e sequestradores de navegador clássicos
+pup:hotbar
+pup:zango
+pup:bonzi
+pup:cydoor
+pup:180solutions
+pup:webhancer
+pup:cometcursor
+pup:comet cursor
+pup:vosteran
+pup:iminent
+pup:trovi
+pup:browsefox
+pup:ilivid
+pup:pricegong
+pup:yessearch
+pup:safefinder
+pup:qvo6
+pup:eorezo
+pup:istartsurf
+pup:startpage
+# "Otimizadores" e removedores que assustam o usuário para vender
+pup:pc optimizer pro
+pup:reimage
+pup:systweak
+pup:driver updater pro
+pup:registry reviver
+pup:pc speed maximizer
+pup:speedupmypc
+pup:mackeeper

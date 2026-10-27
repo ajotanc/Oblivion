@@ -10,6 +10,8 @@ pub mod exec;
 pub mod repair;
 pub mod secure;
 pub mod undo;
+#[cfg(windows)]
+pub(crate) mod wmi;
 
 use std::{
     fs, io,
@@ -45,6 +47,11 @@ pub enum Plan {
     },
     /// Devolve um valor do sistema ao padrão (lista fixa em `repair`).
     Repair(repair::RegFix),
+    /// Remove uma assinatura de eventos do WMI (consumidor, filtro e vínculo), com desfazer.
+    Wmi {
+        name: String,
+        class: &'static str,
+    },
     /// Comenta uma linha do arquivo hosts (o original fica na quarentena).
     Hosts {
         entry: String,
@@ -78,6 +85,9 @@ impl Plan {
                 "Encerrar o processo {pid} e mover o executável para a quarentena (se estiver numa pasta do usuário)"
             ),
             Plan::Repair(fix) => fix.describe(),
+            Plan::Wmi { name, .. } => format!(
+                "Remover a assinatura do WMI \"{name}\" (consumidor, filtro e vínculo ficam guardados na quarentena e o `undo` recria)"
+            ),
             Plan::Hosts { entry } => format!(
                 "Comentar a linha \"{entry}\" do arquivo hosts (o arquivo original fica guardado na quarentena)"
             ),
@@ -148,6 +158,12 @@ pub fn plan(f: &Finding) -> Option<Plan> {
         "conhecidos" => Plan::Manual(
             "Desinstale pelo Windows (Configurações > Aplicativos > Aplicativos instalados). Depois rode o scan de novo para ver se sobrou algo.",
         ),
+        "atalhos" => Plan::Manual(
+            "Abra as Propriedades do atalho e corrija o campo Destino (ou apague o atalho e recrie pelo programa original).",
+        ),
+        "ads" => Plan::Manual(
+            "O arquivo escondido fica dentro de outro; confirme de onde veio (veja o relatório) e apague o arquivo hospedeiro, ou limpe o fluxo com `Remove-Item -Stream`.",
+        ),
         "baseline" => Plan::Manual(
             "Compare com o padrão do Windows e restaure pelo Editor de Registro; se um programa seu (ex.: leitor biométrico) instalou isso, ignore.",
         ),
@@ -163,9 +179,19 @@ pub fn plan(f: &Finding) -> Option<Plan> {
         "seguranca" => Plan::Manual(
             "Restaure a configuração pelo próprio Windows (Segurança do Windows ou Política de Grupo) e investigue quem a alterou; se foi você ou sua empresa, ignore.",
         ),
-        "wmi" => Plan::Manual(
-            "Remova o consumidor e o vínculo em root/subscription (Remove-CimInstance) depois de confirmar que não são de um programa seu.",
-        ),
+        "wmi" => {
+            let class = if f.location.ends_with("(CMD)") {
+                Some("CommandLineEventConsumer")
+            } else if f.location.ends_with("(SCRIPT)") {
+                Some("ActiveScriptEventConsumer")
+            } else {
+                None
+            };
+            class.map_or(
+                Plan::Manual("Remova o consumidor e o vínculo em root/subscription depois de confirmar que não são de um programa seu."),
+                |class| Plan::Wmi { name: f.name.clone(), class },
+            )
+        }
         "extensoes" => {
             Plan::Manual("Remova a extensão pelo próprio navegador (menu de extensões).")
         }
@@ -264,7 +290,7 @@ fn is_safe_to_auto_confirm(f: &Finding, plan: &Plan) -> bool {
     match plan {
         Plan::Process { .. } => f.reason == MINER_STRONG_REASON,
         // Mudar configuração do sistema sempre pergunta, mesmo com --yes.
-        Plan::Repair(_) | Plan::Hosts { .. } => false,
+        Plan::Repair(_) | Plan::Hosts { .. } | Plan::Wmi { .. } => false,
         _ => f.severity == Severity::High || f.reason == ORPHAN_REASON,
     }
 }
@@ -531,20 +557,80 @@ mod tests {
             Severity::High,
         );
         assert!(matches!(plan(&winlogon), Some(Plan::Repair(_))));
-        // Serviços e chaves fora da lista seguem só como instrução manual.
-        for location in [
+        // Serviço comum é DESATIVADO (Start=4, reversível); serviço essencial e chave desconhecida só orientam.
+        let service = finding(
+            "persistencia",
             r"HKLM\SYSTEM\CurrentControlSet\Services",
+            "Shell",
+            "evil.exe",
+            Severity::High,
+        );
+        assert!(matches!(plan(&service), Some(Plan::Repair(r)) if r.service() == Some("Shell")));
+        let core = finding(
+            "persistencia",
+            r"HKLM\SYSTEM\CurrentControlSet\Services",
+            "RpcSs",
+            "evil.exe",
+            Severity::High,
+        );
+        assert!(plan(&core).unwrap().is_manual());
+        let other = finding(
+            "persistencia",
             r"HKCU\SOFTWARE\Qualquer\Outra\Chave",
-        ] {
-            let f = finding(
-                "persistencia",
-                location,
-                "Shell",
-                "evil.exe",
-                Severity::High,
-            );
-            assert!(plan(&f).unwrap().is_manual(), "{location}");
-        }
+            "Shell",
+            "evil.exe",
+            Severity::High,
+        );
+        assert!(plan(&other).unwrap().is_manual());
+    }
+
+    #[test]
+    fn wmi_subscriptions_get_a_removal_plan_by_consumer_type() {
+        let cmd = finding(
+            "wmi",
+            r"WMI root\subscription (CMD)",
+            "x",
+            "y",
+            Severity::Suspicious,
+        );
+        assert!(matches!(
+            plan(&cmd),
+            Some(Plan::Wmi {
+                class: "CommandLineEventConsumer",
+                ..
+            })
+        ));
+        let script = finding(
+            "wmi",
+            r"WMI root\subscription (SCRIPT)",
+            "x",
+            "y",
+            Severity::Suspicious,
+        );
+        assert!(matches!(
+            plan(&script),
+            Some(Plan::Wmi {
+                class: "ActiveScriptEventConsumer",
+                ..
+            })
+        ));
+        let unknown = finding(
+            "wmi",
+            r"WMI root\subscription",
+            "x",
+            "y",
+            Severity::Suspicious,
+        );
+        assert!(plan(&unknown).unwrap().is_manual());
+        // Sempre pergunta, mesmo com --yes.
+        let high = finding(
+            "wmi",
+            r"WMI root\subscription (CMD)",
+            "x",
+            "y",
+            Severity::High,
+        );
+        assert!(!is_safe_to_auto_confirm(&high, &plan(&high).unwrap()));
     }
 
     #[test]

@@ -796,6 +796,149 @@ mod tests {
         );
         assert!(exe.exists(), "o desfazer devolveu o executável");
     }
+
+    /// Serviço, assinatura do WMI e linha do hosts DE TESTE: remove/desativa, confere e desfaz. Só elevado.
+    /// Tudo tem o marcador `oblivionbench`; o guarda desfaz mesmo se o teste falhar no meio.
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "altera serviços, WMI e o hosts: rode só elevado, de propósito"]
+    fn real_service_wmi_and_hosts_roundtrip_as_administrator() {
+        use std::process::Command;
+        use winreg::{RegKey, enums::*};
+
+        const SVC: &str = "OblivionBenchSvc";
+        const WMI: &str = "OblivionBenchConsumer";
+        const HOST: &str = "oblivionbench.invalid";
+
+        fn ps(script: &str) -> String {
+            let out = Command::new("powershell")
+                .args(["-NoProfile", "-Command", script])
+                .output()
+                .unwrap();
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        }
+        fn svc_start() -> Option<u32> {
+            RegKey::predef(HKEY_LOCAL_MACHINE)
+                .open_subkey(format!(r"SYSTEM\CurrentControlSet\Services\{SVC}"))
+                .ok()?
+                .get_value("Start")
+                .ok()
+        }
+        fn wmi_exists() -> bool {
+            ps(&format!(
+                "(Get-WmiObject -Namespace root\\subscription -Class CommandLineEventConsumer | Where-Object {{ $_.Name -eq '{WMI}' }}) -ne $null"
+            )) == "True"
+        }
+
+        struct Guard {
+            hosts: Vec<u8>,
+            dirs: Vec<PathBuf>,
+        }
+        impl Drop for Guard {
+            fn drop(&mut self) {
+                let _ = Command::new("sc.exe").args(["stop", SVC]).output();
+                let _ = Command::new("sc.exe").args(["delete", SVC]).output();
+                ps(&format!(
+                    "$ns='root\\subscription'; \
+                     Get-WmiObject -Namespace $ns -Class __FilterToConsumerBinding | Where-Object {{ $_.Consumer -like '*{WMI}*' }} | Remove-WmiObject; \
+                     Get-WmiObject -Namespace $ns -Class CommandLineEventConsumer | Where-Object {{ $_.Name -eq '{WMI}' }} | Remove-WmiObject; \
+                     Get-WmiObject -Namespace $ns -Class __EventFilter | Where-Object {{ $_.Name -eq '{WMI}' }} | Remove-WmiObject"
+                ));
+                let _ = std::fs::write(oblivion_core::scanners::hosts_file(), &self.hosts);
+                for d in &self.dirs {
+                    let _ = std::fs::remove_dir_all(d);
+                }
+            }
+        }
+
+        assert!(privilege::is_elevated(), "este teste exige administrador");
+        let pid = std::process::id();
+        let work = std::env::temp_dir().join(format!("oblivion-bench-svc-{pid}"));
+        std::fs::create_dir_all(&work).unwrap();
+        let exe = work.join("oblivionbench-svc.exe");
+        std::fs::copy(r"C:\Windows\System32\ping.exe", &exe).unwrap();
+        let hosts_path = oblivion_core::scanners::hosts_file();
+        let original_hosts = std::fs::read(&hosts_path).unwrap();
+        let mut guard = Guard {
+            hosts: original_hosts.clone(),
+            dirs: vec![work.clone()],
+        };
+
+        // 1) serviço automático apontando para um programa em Temp (nunca é iniciado de verdade)
+        let created = Command::new("sc.exe")
+            .args([
+                "create",
+                SVC,
+                "binPath=",
+                &exe.display().to_string(),
+                "start=",
+                "auto",
+            ])
+            .output()
+            .unwrap();
+        assert!(created.status.success(), "sc create falhou: {created:?}");
+        assert_eq!(svc_start(), Some(2));
+        // 2) assinatura do WMI (consumidor de linha de comando, filtro e vínculo)
+        ps(&format!(
+            "$ns='root\\subscription'; \
+             $f = Set-WmiInstance -Namespace $ns -Class __EventFilter -Arguments @{{Name='{WMI}'; EventNamespace='root\\cimv2'; QueryLanguage='WQL'; Query='SELECT * FROM __InstanceModificationEvent WITHIN 600 WHERE TargetInstance ISA ''Win32_LocalTime'' AND TargetInstance.Hour=3 AND TargetInstance.Minute=33'}}; \
+             $c = Set-WmiInstance -Namespace $ns -Class CommandLineEventConsumer -Arguments @{{Name='{WMI}'; CommandLineTemplate='cmd.exe /c rem oblivionbench'}}; \
+             Set-WmiInstance -Namespace $ns -Class __FilterToConsumerBinding -Arguments @{{Filter=$f; Consumer=$c}} | Out-Null"
+        ));
+        assert!(wmi_exists(), "a assinatura de teste devia existir");
+        // 3) linha suspeita no hosts
+        let mut hosts = original_hosts.clone();
+        hosts.extend_from_slice(format!("\r\n1.2.3.4 {HOST}\r\n").as_bytes());
+        std::fs::write(&hosts_path, &hosts).unwrap();
+
+        let findings = scanners::scan_all();
+        let ours: Vec<usize> = findings
+            .iter()
+            .enumerate()
+            .filter(|(_, f)| {
+                f.name.contains(SVC) || f.name.contains(WMI) || f.target.contains(HOST)
+            })
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(ours.len(), 3, "esperava serviço, WMI e hosts: {ours:?}");
+        let chosen = select(&findings, &ours).unwrap();
+
+        let done = clean_blocking(chosen, false).unwrap();
+        assert!(done.aborted.is_none(), "{:?}", done.aborted);
+        assert!(
+            done.records.iter().all(|r| r.outcome == "done"),
+            "{:?}",
+            done.records
+                .iter()
+                .map(|r| (&r.name, &r.outcome_label, &r.note))
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            svc_start(),
+            Some(4),
+            "o serviço foi desativado, não apagado"
+        );
+        assert!(!wmi_exists(), "a assinatura do WMI foi removida");
+        let after = String::from_utf8_lossy(&std::fs::read(&hosts_path).unwrap()).into_owned();
+        assert!(
+            after.contains(&format!("# [Oblivion] 1.2.3.4 {HOST}")),
+            "{after}"
+        );
+
+        let qdir = done.quarantine_dir.clone().expect("quarentena");
+        guard.dirs.push(PathBuf::from(&qdir));
+        let undone = undo_dir(&qdir).unwrap();
+        assert!(undone.iter().all(|u| u.ok), "{undone:?}");
+        assert_eq!(
+            svc_start(),
+            Some(2),
+            "o desfazer devolveu o início automático"
+        );
+        assert!(wmi_exists(), "o desfazer recriou a assinatura do WMI");
+        let restored = std::fs::read(&hosts_path).unwrap();
+        assert_eq!(restored, hosts, "o desfazer devolveu o hosts");
+    }
+
     #[test]
     fn screen_options_are_read_like_the_command_line_lists() {
         let sha = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";

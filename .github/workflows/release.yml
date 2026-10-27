@@ -33,6 +33,8 @@ jobs:
     name: Windows (instalador e CLI)
     needs: version
     runs-on: windows-latest
+    env:
+      HAS_CERT: ${{ secrets.WINDOWS_CERT_PFX_BASE64 != '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -51,6 +53,26 @@ jobs:
       - run: pnpm tauri build
         working-directory: app
       - run: cargo build --release -p oblivion
+      # Assinatura digital OPCIONAL: só roda se você cadastrar os dois segredos no repositório
+      # (Settings > Secrets and variables > Actions): WINDOWS_CERT_PFX_BASE64 (o .pfx em base64) e
+      # WINDOWS_CERT_PASSWORD. Sem eles, os arquivos saem sem assinatura, como antes. Nunca coloque o
+      # certificado ou a senha em arquivo do repositório.
+      - name: Assina os executáveis (se houver certificado)
+        if: ${{ env.HAS_CERT == 'true' }}
+        shell: pwsh
+        env:
+          CERT_B64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
+          CERT_PASS: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP 'cert.pfx'
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:CERT_B64))
+          $signtool = (Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe' | Sort-Object FullName | Select-Object -Last 1).FullName
+          $files = @((Get-ChildItem target/release/bundle/nsis/*-setup.exe).FullName, (Resolve-Path target/release/oblivion.exe).Path)
+          foreach ($f in $files) {
+            & $signtool sign /f $pfx /p $env:CERT_PASS /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 $f
+            if ($LASTEXITCODE -ne 0) { throw "Falhou ao assinar $f" }
+          }
+          Remove-Item $pfx -Force
       - name: Reúne os arquivos
         shell: pwsh
         run: |

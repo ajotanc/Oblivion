@@ -1,4 +1,6 @@
 #[cfg(windows)]
+mod ads_win;
+#[cfg(windows)]
 mod baseline_win;
 mod browser;
 mod firefox;
@@ -11,6 +13,8 @@ mod persistence_linux;
 pub(crate) mod persistence_win;
 mod processes;
 mod rootkit;
+#[cfg(windows)]
+mod shortcuts_win;
 #[cfg(windows)]
 mod tamper_win;
 #[cfg(windows)]
@@ -55,6 +59,11 @@ fn failed_scanner(scanner: &'static str, label: &str) -> Finding {
 }
 
 pub(crate) use network::hosts_path;
+
+/// Caminho do arquivo hosts (usado pelos testes reais do app).
+pub fn hosts_file() -> std::path::PathBuf {
+    hosts_path()
+}
 pub(crate) use processes::is_critical as is_critical_process;
 
 /// Roda os scanners ao mesmo tempo (o do minerador sozinho leva ~5 s medindo a CPU) e junta os achados.
@@ -146,6 +155,16 @@ pub fn scan_all_with(on_progress: &(dyn Fn(Progress) + Sync)) -> Vec<Finding> {
             Box::new(startup_windows),
         ));
         jobs.push(("WMI", "wmi", Box::new(wmi_win::scan)));
+        jobs.push((
+            "Atalhos adulterados",
+            "atalhos",
+            Box::new(shortcuts_win::scan),
+        ));
+        jobs.push((
+            "Fluxos alternativos de dados (ADS)",
+            "ads",
+            Box::new(ads_win::scan),
+        ));
         jobs.push((
             "Valores padrão do Windows (boot, LSA, Explorer)",
             "baseline",

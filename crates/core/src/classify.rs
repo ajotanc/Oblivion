@@ -25,6 +25,30 @@ const HIGH: &[(&str, &str)] = &[
         "process call create",
         "Cria processo pelo WMI (executa sem janela)",
     ),
+    (
+        "delete shadows",
+        "Apaga cópias de sombra do Windows (comportamento típico de ransomware)",
+    ),
+    (
+        "recoveryenabled no",
+        "Desliga a recuperação de inicialização do Windows",
+    ),
+    ("allprofiles state off", "Desliga o firewall do Windows"),
+    ("-urlcache", "certutil baixando arquivo da internet"),
+    ("/transfer", "bitsadmin baixando arquivo em segundo plano"),
+    ("stratum+tcp", "Conexão de pool de mineração de criptomoeda"),
+    (
+        "--donate-level",
+        "Argumento típico de minerador de criptomoeda",
+    ),
+    (
+        "-exclusionpath",
+        "Adiciona exclusão ao Windows Defender (esconde pasta do antivírus)",
+    ),
+    (
+        "disablerealtimemonitoring",
+        "Desliga a proteção em tempo real do Windows Defender",
+    ),
     ("\\temp\\", "Executa a partir de pasta temporária"),
     ("%temp%", "Executa a partir de pasta temporária"),
     ("%tmp%", "Executa a partir de pasta temporária"),
@@ -65,6 +89,15 @@ const SCRIPT: &[(&str, &str)] = &[
         ".scr",
         "Protetor de tela, extensão muito usada para disfarçar executável",
     ),
+    ("attrib +h", "Esconde arquivos pela linha de comando"),
+    (
+        "schtasks /create",
+        "Cria uma tarefa agendada a partir de outro programa",
+    ),
+    (
+        "localgroup administrators",
+        "Mexe no grupo de administradores",
+    ),
 ];
 
 // Suspeita só pelo ONDE está: uma assinatura digital válida pode rebaixar (ver `trust`).
@@ -84,6 +117,11 @@ const LOCATION: &[(&str, &str)] = &[
         "Pasta pública gravável por qualquer usuário",
     ),
     ("\\downloads\\", "Executa a partir da pasta de downloads"),
+    (
+        "\\perflogs\\",
+        "Pasta de registros do Windows que não deveria ter programas",
+    ),
+    ("$recycle.bin", "Executa de dentro da Lixeira"),
 ];
 
 /// Padrões de extensão (`.js`) só valem se terminam ali: `host.json` não é script.

@@ -42,13 +42,15 @@ Não há atualização automática: foi retirada a pedido e fica para uma fase f
 
 | Área | O que olha | Se achar |
 |---|---|---|
-| Inicialização | chaves Run, pasta Startup, Winlogon, IFEO, AppInit, serviços, drivers, tarefas agendadas, WMI | remove (Run, Startup, tarefa) ou restaura o padrão (Winlogon) |
+| Inicialização | chaves Run, pasta Startup, Winlogon, IFEO, AppInit, serviços, drivers, tarefas agendadas, WMI | remove (Run, Startup, tarefa, assinatura do WMI), **desativa** serviços comuns (`Start=4`, reversível) ou restaura o padrão (Winlogon); serviços essenciais do Windows e drivers só orientam |
 | Processos | processos disfarçados de programas do Windows, assinatura digital, mineradores (CPU, GPU, rede) | encerra e move o executável |
 | Padrões do Windows | BootExecute, shell do modo seguro, pacotes do LSA, extensões do Explorer (BHO), win.ini e system.ini | restaura o padrão onde há um seguro |
 | Defesas | Defender, UAC, firewall, Gerenciador de Tarefas, Editor de Registro, atualizações | restaura o padrão |
 | Rede | arquivo hosts, proxy, DNS fixo | comenta a linha do hosts, desliga o proxy; DNS é manual |
 | Programas conhecidos | falsos antivírus e adware de uma lista curta e curada | orienta a desinstalar |
-| Navegadores | extensões do Chromium e do Firefox | orienta remover |
+| Navegadores | extensões do Chromium e do Firefox | orienta remover (não é automático: o navegador regrava as preferências e pode reinstalar) |
+| Atalhos | atalhos da Área de Trabalho e do menu Iniciar com comando de ataque ou que abrem sempre um endereço fixo no navegador | orienta corrigir o destino |
+| Fluxos ocultos (ADS) | programas e scripts escondidos dentro de outros arquivos (NTFS) nas pastas onde malware se instala | orienta apagar o arquivo hospedeiro |
 | Disco de boot | MBR | só avisa: não grava no disco de boot |
 | Rootkits | processos que aparecem numa forma de listar e somem de outra; nomes ocultos no registro | avisa; **não detecta rootkits de kernel** |
 
@@ -66,6 +68,12 @@ valor: HKCU\Software\Microsoft\Windows\CurrentVersion\Run | NomeDoValor
 inicializacao: atalho-suspeito.lnk
 processo: programa.exe
 ```
+
+**Como medir.** `cargo test -p oblivion-core --features bench --test detection_benchmark -- --ignored --nocapture`
+cria itens falsos (persistência, processos, IOC, ADS) no seu usuário e mostra quantos a varredura achou, mais controles
+que não podem virar alarme. O teste elevado `cargo test -p oblivion-app --lib -- --ignored real_service_wmi_and_hosts`
+(terminal de administrador) cobre serviço, WMI e hosts. `tools/sandbox/` roda a medição dentro do Windows Sandbox.
+Esses números medem os casos que o projeto conhece; **não** são uma taxa de detecção de malware real.
 
 A base de indicadores embutida é **pequena e curada à mão** (`crates/core/data/`); o Oblivion não promete
 reconhecer todo malware. `tools/refresh-iocs.ps1` atualiza a lista de hashes a partir do MalwareBazaar (abuse.ch,
@@ -144,6 +152,11 @@ O GitHub Actions (`.github/workflows/ci.yml`) roda a cada envio: tipos, build e 
 e `cargo audit`. O CI só tem permissão de leitura do código.
 
 ## Publicar uma versão
+
+> Assinatura digital: opcional. Se cadastrar os segredos `WINDOWS_CERT_PFX_BASE64` e `WINDOWS_CERT_PASSWORD` no
+> repositório (Settings > Secrets and variables > Actions), o workflow assina o instalador e o CLI do Windows.
+> Sem eles, sai sem assinatura. O certificado nunca entra em arquivo do repositório.
+
 
 1. Aumente a versão nos três lugares (têm de ser iguais): `Cargo.toml` (`[workspace.package]`), `app/package.json`
    e `app/src-tauri/tauri.conf.json`.

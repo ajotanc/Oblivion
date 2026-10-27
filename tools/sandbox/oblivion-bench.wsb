@@ -1,0 +1,28 @@
+<!--
+  Roda a medição de detecção do Oblivion dentro do Windows Sandbox (um Windows descartável: tudo some ao fechar).
+  Assim os itens de teste, e qualquer reparo real, não tocam no seu PC.
+
+  Requisitos: Windows 10/11 Pro, Enterprise ou Education com o recurso "Windows Sandbox" ligado
+  (Ativar ou desativar recursos do Windows > Windows Sandbox) e virtualização ativa na BIOS.
+
+  Como usar (veja tools/sandbox/README.md):
+    1. Gere os executáveis de teste:  tools\sandbox\prepare.ps1
+    2. Dê dois cliques neste arquivo. O Sandbox abre e roda o script sozinho.
+
+  Pasta compartilhada: SOMENTE LEITURA (o Sandbox não consegue alterar nada no seu disco).
+  Rede desligada: o que roda lá não fala com a internet.
+-->
+<Configuration>
+  <VGpu>Disable</VGpu>
+  <Networking>Disable</Networking>
+  <MappedFolders>
+    <MappedFolder>
+      <HostFolder>D:\Apps\Oblivion\target\sandbox</HostFolder>
+      <SandboxFolder>C:\Oblivion</SandboxFolder>
+      <ReadOnly>true</ReadOnly>
+    </MappedFolder>
+  </MappedFolders>
+  <LogonCommand>
+    <Command>powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Oblivion\run-in-sandbox.ps1</Command>
+  </LogonCommand>
+</Configuration>

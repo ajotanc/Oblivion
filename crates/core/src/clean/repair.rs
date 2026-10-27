@@ -26,10 +26,24 @@ pub struct RegFix {
     pub subkey: String,
     pub name: &'static str,
     pub fix: Fix,
+    /// Só para serviços: o `ImagePath` visto no scan. Se mudou, o serviço não é mais o mesmo e nada é alterado.
+    pub expect_image: Option<String>,
 }
 
 impl RegFix {
+    /// Nome do serviço, se este reparo desativa um serviço (`Services\<nome>`, valor `Start`).
+    pub fn service(&self) -> Option<&str> {
+        self.subkey
+            .strip_prefix(SERVICES_PREFIX)
+            .filter(|_| self.name == "Start")
+    }
+
     pub fn describe(&self) -> String {
+        if let Some(svc) = self.service() {
+            return format!(
+                "Desativar o serviço \"{svc}\" (para de iniciar com o Windows e é parado agora; o valor antigo fica guardado e o `undo` devolve)"
+            );
+        }
         let to = match &self.fix {
             Fix::Delete => "removê-lo (o padrão é não existir)".to_string(),
             Fix::Str(s) => format!("\"{s}\""),
@@ -41,6 +55,75 @@ impl RegFix {
             self.name, self.hive, self.subkey
         )
     }
+}
+
+/// Serviços essenciais do Windows: desativar qualquer um deixaria o sistema sem iniciar ou sem rede.
+const CRITICAL_SERVICES: &[&str] = &[
+    "rpcss",
+    "rpceptmapper",
+    "dcomlaunch",
+    "lsm",
+    "samss",
+    "eventlog",
+    "plugplay",
+    "power",
+    "profsvc",
+    "schedule",
+    "winmgmt",
+    "wininit",
+    "lanmanworkstation",
+    "lanmanserver",
+    "dhcp",
+    "dnscache",
+    "nsi",
+    "bfe",
+    "mpssvc",
+    "cryptsvc",
+    "trustedinstaller",
+    "wuauserv",
+    "windefend",
+    "wscsvc",
+    "sens",
+    "themes",
+    "audiosrv",
+    "audioendpointbuilder",
+    "gpsvc",
+    "usermanager",
+    "tabletinputservice",
+    "keyiso",
+    "nlasvc",
+    "netlogon",
+    "seclogon",
+    "sysmain",
+    "time",
+    "w32time",
+    "browser",
+    "bits",
+];
+
+const SERVICES_PREFIX: &str = r"SYSTEM\CurrentControlSet\Services\";
+
+/// Reparo "desativar serviço": `Start = 4`. Só para nomes simples e fora da lista de serviços essenciais.
+fn service_fix(hive: &str, subkey: &str, name: &str, image: Option<String>) -> Option<RegFix> {
+    let svc = subkey
+        .get(..SERVICES_PREFIX.len())
+        .filter(|p| p.eq_ignore_ascii_case(SERVICES_PREFIX))
+        .map(|_| &subkey[SERVICES_PREFIX.len()..])?;
+    let plain = !svc.is_empty()
+        && svc
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "_-.".contains(c));
+    (hive.eq_ignore_ascii_case("HKLM")
+        && name.eq_ignore_ascii_case("Start")
+        && plain
+        && !CRITICAL_SERVICES.contains(&svc.to_lowercase().as_str()))
+    .then(|| RegFix {
+        hive: "HKLM",
+        subkey: format!("{SERVICES_PREFIX}{svc}"),
+        name: "Start",
+        fix: Fix::Dword(4),
+        expect_image: image,
+    })
 }
 
 const POLICIES_SYSTEM: &str = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System";
@@ -181,6 +264,9 @@ fn table() -> Vec<(&'static str, String, &'static str, Fix)> {
 
 /// A correção prevista para este par, se ele estiver na lista fixa (sem diferenciar maiúsculas).
 pub fn fix_for(hive: &str, subkey: &str, name: &str) -> Option<RegFix> {
+    if let Some(svc) = service_fix(hive, subkey, name, None) {
+        return Some(svc);
+    }
     table().into_iter().find_map(|(h, s, n, fix)| {
         (h.eq_ignore_ascii_case(hive)
             && s.eq_ignore_ascii_case(subkey)
@@ -190,6 +276,7 @@ pub fn fix_for(hive: &str, subkey: &str, name: &str) -> Option<RegFix> {
             subkey: s,
             name: n,
             fix,
+            expect_image: None,
         })
     })
 }
@@ -204,6 +291,14 @@ pub fn plan_for(f: &Finding) -> Option<Plan> {
     match f.scanner {
         "seguranca" | "baseline" | "persistencia" => {
             let (hive, subkey) = f.location.split_once('\\')?;
+            // Serviço do Windows de início automático: desativa em vez de apagar (reversível).
+            if f.scanner == "persistencia"
+                && subkey.eq_ignore_ascii_case(r"SYSTEM\CurrentControlSet\Services")
+                && !f.name.contains(' ')
+            {
+                let sub = format!("{SERVICES_PREFIX}{}", f.name);
+                return service_fix(hive, &sub, "Start", Some(f.target.clone())).map(Plan::Repair);
+            }
             // Em "persistencia" só o Winlogon entra aqui; as chaves Run seguem o plano de remoção.
             if f.scanner == "persistencia" && !subkey.eq_ignore_ascii_case(WINLOGON) {
                 return None;
@@ -434,6 +529,13 @@ mod win {
             }
             Err(e) => return failed(format!("não consegui abrir a chave (administrador?): {e}")),
         };
+        // Serviço: confere que é o mesmo do scan (o ImagePath não pode ter mudado).
+        if let Some(expected) = &fix.expect_image {
+            let current: String = key.get_value("ImagePath").unwrap_or_default();
+            if &current != expected {
+                return skipped("o serviço mudou desde o scan");
+            }
+        }
         let old = key.get_raw_value(fix.name).ok();
         let want = desired(&fix.fix);
         match (&old, &want) {
@@ -466,12 +568,26 @@ mod win {
         if !ok {
             return failed("o valor não ficou como esperado depois da alteração".into());
         }
+        // Serviço: além de não iniciar mais, para a instância que está rodando agora (se não parar, o Start=4 já vale no próximo boot).
+        let stopped = fix.service().map(|svc| {
+            Command::new("sc.exe")
+                .args(["stop", svc])
+                .output()
+                .is_ok_and(|o| o.status.success())
+        });
         let backup = exported.map_or("sem .reg (valor guardado no manifesto)".to_string(), |p| {
             format!("backup em {}", p.display())
         });
+        let extra = match stopped {
+            Some(true) => " Serviço parado.",
+            Some(false) => {
+                " O serviço não foi parado agora (não estava rodando ou exige reiniciar); não inicia mais no próximo boot."
+            }
+            None => "",
+        };
         Exec {
             outcome: Outcome::Done,
-            note: format!("Valor restaurado ao padrão; {backup}."),
+            note: format!("Valor restaurado ao padrão; {backup}.{extra}"),
             undo: vec![undo],
         }
     }
@@ -599,6 +715,58 @@ mod tests {
         assert!(comment_out(hosts, "9.9.9.9 nada.com").is_none());
         // Linha já comentada não conta.
         assert!(comment_out("# 1.2.3.4 banco.com\n", "1.2.3.4 banco.com").is_none());
+    }
+
+    #[test]
+    fn a_suspicious_service_is_disabled_not_deleted_and_core_services_are_refused() {
+        let svc = finding(
+            "persistencia",
+            r"HKLM\SYSTEM\CurrentControlSet\Services",
+            "Updater3",
+            r"C:\ProgramData\x\up.exe",
+        );
+        let Some(Plan::Repair(fix)) = plan_for(&svc) else {
+            panic!("devia haver reparo para o serviço");
+        };
+        assert_eq!((fix.name, &fix.fix), ("Start", &Fix::Dword(4)));
+        assert_eq!(fix.service(), Some("Updater3"));
+        assert_eq!(
+            fix.expect_image.as_deref(),
+            Some(r"C:\ProgramData\x\up.exe")
+        );
+        assert!(fix.describe().contains("Desativar o serviço"));
+
+        // Serviço essencial, nome com caminho e driver (nome com espaço) nunca ganham reparo.
+        for name in ["RpcSs", "WinDefend", "a\\b", "Algo (driver)", "", "x y"] {
+            let f = finding(
+                "persistencia",
+                r"HKLM\SYSTEM\CurrentControlSet\Services",
+                name,
+                "c:\\a.exe",
+            );
+            assert!(plan_for(&f).is_none(), "{name}");
+        }
+        // O undo só aceita o Start de um serviço comum.
+        assert!(is_allowed(
+            "HKLM",
+            r"SYSTEM\CurrentControlSet\Services\Updater3",
+            "Start"
+        ));
+        assert!(!is_allowed(
+            "HKLM",
+            r"SYSTEM\CurrentControlSet\Services\RpcSs",
+            "Start"
+        ));
+        assert!(!is_allowed(
+            "HKLM",
+            r"SYSTEM\CurrentControlSet\Services\Updater3",
+            "ImagePath"
+        ));
+        assert!(!is_allowed(
+            "HKLM",
+            r"SYSTEM\CurrentControlSet\Services\a\b",
+            "Start"
+        ));
     }
 
     #[test]

@@ -51,7 +51,7 @@ fn parse(output: Option<&str>) -> Vec<Finding> {
                 };
                 findings.push(Finding {
                     scanner: SCANNER,
-                    location: LOCATION.into(),
+                    location: format!("{LOCATION} ({kind})"),
                     name: name.trim().to_string(),
                     target: if command.is_empty() {
                         "(vazio)".into()

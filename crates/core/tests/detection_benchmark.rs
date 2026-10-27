@@ -135,6 +135,14 @@ fn measure_detection_and_false_positives() {
     fs::copy(r"C:\Windows\System32\PING.EXE", &public).unwrap();
     b.public = Some(public.clone());
     let by_name = b.fake_exe(&format!("{MARK}-nome-conhecido.exe"));
+    // Programa escondido num fluxo alternativo de dados (começa com "MZ", como todo executável do Windows).
+    let host = b.dir.join(format!("{MARK}-ads.txt"));
+    fs::write(&host, "texto comum").unwrap();
+    fs::write(
+        format!("{}:oculto", host.display()),
+        b"MZ\x90\x00 conteudo de teste",
+    )
+    .unwrap();
 
     b.run_value(&format!("{MARK}-ps-enc"), "powershell.exe -nop -w hidden -enc SQBFAFgAIAAoAGkAdwByACAAaAB0AHQAcAA6AC8ALwB4AC4AaQBuAHYAYQBsAGkAZAApAA==");
     b.run_value(
@@ -229,6 +237,10 @@ fn measure_detection_and_false_positives() {
         ("cscript", "cscript executando JScript"),
         ("publico", "programa em Users\\Public"),
         ("b64", "PowerShell decodificando base64"),
+        (
+            "OblivionBench-ads.txt:oculto",
+            "programa escondido em fluxo alternativo (ADS)",
+        ),
     ]
     .map(|(id, what)| Sample {
         id: id.to_string(),
